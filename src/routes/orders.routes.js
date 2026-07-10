@@ -1,0 +1,134 @@
+const router = require('express').Router();
+const prisma = require('../utils/prisma');
+const { optionalAuth, requireAuth } = require('../middleware/auth');
+
+function computePoints(items, total) {
+  const perProduct = items.reduce((sum, i) => sum + (i.points || 0) * (i.qty || 1), 0);
+  if (perProduct > 0) return perProduct;
+  return Math.floor(total / 10);
+}
+
+router.post('/', optionalAuth, async (req, res) => {
+  try {
+    const { items, customer, customerPhone, customerName, payMethod, source, giftCardCode } = req.body;
+    if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Aucun article dans la commande' });
+
+    const total = items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
+
+    let customerRecord = null;
+    const phone = customerPhone || (typeof customer === 'object' ? customer?.phone : null);
+    const name = customerName || (typeof customer === 'object' ? customer?.name : (typeof customer === 'string' ? customer : null));
+    if (phone) {
+      customerRecord = await prisma.customer.upsert({
+        where: { phone },
+        update: { name: name || undefined },
+        create: { phone, name },
+      });
+    }
+
+    let giftCardUsed = null;
+    let remainingTotal = total;
+    if (giftCardCode) {
+      const gc = await prisma.giftCard.findUnique({ where: { code: giftCardCode } });
+      if (!gc || gc.status !== 'ACTIVE') return res.status(400).json({ error: 'Carte cadeau invalide ou déjà utilisée' });
+      const deduction = Math.min(gc.balance, total);
+      remainingTotal = total - deduction;
+      const newBalance = gc.balance - deduction;
+      await prisma.giftCard.update({
+        where: { id: gc.id },
+        data: {
+          balance: newBalance,
+          status: (gc.singleUse || newBalance <= 0) ? 'USED' : 'ACTIVE',
+          usedAt: new Date(),
+        },
+      });
+      giftCardUsed = giftCardCode;
+    }
+
+    const pointsEarned = customerRecord ? computePoints(items, remainingTotal) : 0;
+
+    const order = await prisma.order.create({
+      data: {
+        source: source || 'menu',
+        status: 'PENDING',
+        total,
+        payMethod,
+        giftCardUsed,
+        pointsEarned,
+        customerId: customerRecord?.id,
+        customerName: name,
+        customerPhone: phone,
+        employeeId: req.user && req.user.role !== 'CUSTOMER' ? req.user.id : undefined,
+        items: {
+          create: items.map(i => ({
+            productId: i.id || i.productId || undefined,
+            name: i.name,
+            price: i.price,
+            qty: i.qty || 1,
+          })),
+        },
+      },
+      include: { items: true },
+    });
+
+    if (customerRecord && pointsEarned > 0) {
+      await prisma.customer.update({
+        where: { id: customerRecord.id },
+        data: { pointsTotal: { increment: pointsEarned } },
+      });
+    }
+
+    for (const i of items) {
+      if (i.id) {
+        await prisma.product.updateMany({
+          where: { id: i.id, stockQty: { not: null } },
+          data: { stockQty: { decrement: i.qty || 1 } },
+        }).catch(() => {});
+      }
+    }
+
+    req.app.get('io').emit('order:new', order);
+
+    res.status(201).json(order);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+router.get('/', requireAuth, async (req, res) => {
+  const { status } = req.query;
+  const orders = await prisma.order.findMany({
+    where: status ? { status } : { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    include: { items: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json(orders);
+});
+
+router.get('/:id', requireAuth, async (req, res) => {
+  const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { items: true } });
+  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+  res.json(order);
+});
+
+router.patch('/:id/status', requireAuth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const valid = ['PENDING', 'APPROVED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
+    if (!valid.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+
+    const order = await prisma.order.update({
+      where: { id: req.params.id },
+      data: { status },
+      include: { items: true },
+    });
+
+    req.app.get('io').emit('order:update', order);
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+module.exports = router;
