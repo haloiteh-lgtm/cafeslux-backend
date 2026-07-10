@@ -64,4 +64,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Café LUX API] listening on port ${PORT}`));
+server.listen(PORT, () => console.log(`[Café LUX API] listening on port ${PORT}`));
