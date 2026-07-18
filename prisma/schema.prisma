@@ -229,3 +229,49 @@ model Review {
   comment    String?
   createdAt  DateTime @default(now())
 }
+
+// ─────────────────────────────────────────────
+// GAMING ZONE (Snooker, Billard, PS5, PS4)
+// ─────────────────────────────────────────────
+enum StationType {
+  SNOOKER
+  BILLARD
+  PS5
+  PS4
+}
+
+enum StationStatus {
+  IDLE
+  ACTIVE
+}
+
+model GamingStation {
+  id        String        @id @default(cuid())
+  label     String        // ex: "Snooker", "Billard 1", "PS5", "PS4"
+  type      StationType
+  status    StationStatus @default(IDLE)
+  sessions  GamingSession[]
+  createdAt DateTime      @default(now())
+}
+
+enum GamingSessionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model GamingSession {
+  id            String    @id @default(cuid())
+  station       GamingStation @relation(fields: [stationId], references: [id])
+  stationId     String
+  playerName    String?
+  planLabel     String?   // ex: "1 heure", "Partie"
+  totalPrice    Float
+  paymentMethod String?
+  paymentStatus String    @default("pending")
+  status        GamingSessionStatus @default(ACTIVE)
+  startedAt     DateTime  @default(now())
+  endsAt        DateTime? // null for flat-fee (snooker/billard) sessions ended manually
+  endedAt       DateTime?
+  createdAt     DateTime  @default(now())
+}
