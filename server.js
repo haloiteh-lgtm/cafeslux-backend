@@ -15,6 +15,7 @@ const employeesRoutes = require('./src/routes/employees.routes');
 const reservationsRoutes = require('./src/routes/reservations.routes');
 const stockRoutes = require('./src/routes/stock.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
+const gamingRoutes = require('./src/routes/gaming.routes');
 const publicRoutes = require('./src/routes/public.routes');
 
 const app = express();
@@ -54,6 +55,7 @@ app.use('/api/employees', employeesRoutes);
 app.use('/api/reservations', reservationsRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/gaming', gamingRoutes);
 app.use('/api', publicRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable' }));
