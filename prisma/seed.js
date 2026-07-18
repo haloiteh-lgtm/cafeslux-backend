@@ -40,6 +40,21 @@ async function main() {
   });
 
   console.log('✔ Menu de démonstration créé');
+
+  // ── Gaming Zone stations ──────────────────────────────
+  const stations = [
+    { id: 'stn-snooker-1', label: 'Snooker', type: 'SNOOKER' },
+    { id: 'stn-billard-1', label: 'Billard 1', type: 'BILLARD' },
+    { id: 'stn-billard-2', label: 'Billard 2', type: 'BILLARD' },
+    { id: 'stn-billard-3', label: 'Billard 3', type: 'BILLARD' },
+    { id: 'stn-ps5-1',     label: 'PS5', type: 'PS5' },
+    { id: 'stn-ps4-1',     label: 'PS4', type: 'PS4' },
+  ];
+  for (const s of stations) {
+    await prisma.gamingStation.upsert({ where: { id: s.id }, update: {}, create: s });
+  }
+  console.log('✔ Gaming Zone: 6 stations créées (1 Snooker, 3 Billard, 1 PS5, 1 PS4)');
+
   console.log('\n➡ Connexion Admin / POS / Staff Portal : PIN = ' + adminPin);
 }
 
