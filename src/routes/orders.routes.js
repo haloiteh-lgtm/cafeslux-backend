@@ -95,12 +95,34 @@ router.post('/', optionalAuth, async (req, res) => {
   }
 });
 
+const STATUS_MAP = {
+  pending: 'PENDING',
+  approved: 'APPROVED',
+  preparing: 'PREPARING',
+  ready: 'READY',
+  delivered: 'COMPLETED', // dashboard label "Livré" maps to COMPLETED
+  completed: 'COMPLETED',
+  cancelled: 'CANCELLED',
+};
+
 router.get('/', requireAuth, async (req, res) => {
-  const { status } = req.query;
+  const { status, limit } = req.query;
+  let where;
+  if (status === 'all') {
+    where = {}; // full history — used by Tableau de Bord
+  } else if (status) {
+    const mapped = STATUS_MAP[status.toLowerCase()] || status.toUpperCase();
+    where = { status: mapped };
+  } else {
+    // default (KDS / POS live queue): active orders only
+    where = { status: { notIn: ['COMPLETED', 'CANCELLED'] } };
+  }
+  const take = Math.min(parseInt(limit, 10) || 200, 500);
   const orders = await prisma.order.findMany({
-    where: status ? { status } : { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    where,
     include: { items: true },
     orderBy: { createdAt: 'desc' },
+    take,
   });
   res.json(orders);
 });
