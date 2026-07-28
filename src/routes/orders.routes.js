@@ -31,8 +31,15 @@ router.post('/', optionalAuth, async (req, res) => {
     if (giftCardCode) {
       const gc = await prisma.giftCard.findUnique({ where: { code: giftCardCode } });
       if (!gc || gc.status !== 'ACTIVE') return res.status(400).json({ error: 'Carte cadeau invalide ou déjà utilisée' });
-      const deduction = Math.min(gc.balance, total);
-      remainingTotal = total - deduction;
+      if (gc.balance < total) {
+        return res.status(400).json({
+          error: `Solde insuffisant sur la carte cadeau (${gc.balance.toFixed(2)} DH disponible pour ${total.toFixed(2)} DH de commande). Choisissez un autre mode de paiement ou réduisez le panier.`,
+          balance: gc.balance,
+          total,
+        });
+      }
+      const deduction = total;
+      remainingTotal = 0;
       const newBalance = gc.balance - deduction;
       await prisma.giftCard.update({
         where: { id: gc.id },
@@ -100,7 +107,7 @@ const STATUS_MAP = {
   approved: 'APPROVED',
   preparing: 'PREPARING',
   ready: 'READY',
-  delivered: 'COMPLETED', // dashboard label "Livré" maps to COMPLETED
+  delivered: 'COMPLETED',
   completed: 'COMPLETED',
   cancelled: 'CANCELLED',
 };
@@ -109,12 +116,11 @@ router.get('/', requireAuth, async (req, res) => {
   const { status, limit } = req.query;
   let where;
   if (status === 'all') {
-    where = {}; // full history — used by Tableau de Bord
+    where = {};
   } else if (status) {
     const mapped = STATUS_MAP[status.toLowerCase()] || status.toUpperCase();
     where = { status: mapped };
   } else {
-    // default (KDS / POS live queue): active orders only
     where = { status: { notIn: ['COMPLETED', 'CANCELLED'] } };
   }
   const take = Math.min(parseInt(limit, 10) || 200, 500);
