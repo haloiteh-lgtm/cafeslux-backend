@@ -159,4 +159,33 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /api/orders/:id — cancel/remove an order (used by "X" button in dashboard)
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+
+    if (order.giftCardUsed) {
+      const gc = await prisma.giftCard.findUnique({ where: { code: order.giftCardUsed } });
+      if (gc) {
+        await prisma.giftCard.update({
+          where: { id: gc.id },
+          data: { balance: { increment: order.total }, status: 'ACTIVE' },
+        });
+      }
+    }
+
+    const cancelled = await prisma.order.update({
+      where: { id: req.params.id },
+      data: { status: 'CANCELLED' },
+    });
+
+    req.app.get('io').emit('order:update', cancelled);
+
+    res.json({ ok: true, order: cancelled });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 module.exports = router;
