@@ -28,16 +28,16 @@ async function main() {
     create: { id: 'cat-patisserie', name: 'Pâtisserie', icon: '🥐', position: 2 },
   });
 
-  await prisma.product.createMany({
-    data: [
-      { categoryId: boissons.id, name: 'Café Lux Signature', price: 25, isSignature: true, points: 3 },
-      { categoryId: boissons.id, name: 'Cappuccino', price: 20, points: 2 },
-      { categoryId: boissons.id, name: 'Thé à la menthe', price: 15, points: 1 },
-      { categoryId: patisserie.id, name: 'Croissant', price: 12, points: 1 },
-      { categoryId: patisserie.id, name: 'Pain au chocolat', price: 14, points: 1 },
-    ],
-    skipDuplicates: true,
-  });
+  const demoProducts = [
+    { id: 'prod-cafe-signature', categoryId: boissons.id, name: 'Café Lux Signature', price: 25, isSignature: true, points: 3 },
+    { id: 'prod-cappuccino', categoryId: boissons.id, name: 'Cappuccino', price: 20, points: 2 },
+    { id: 'prod-the-menthe', categoryId: boissons.id, name: 'Thé à la menthe', price: 15, points: 1 },
+    { id: 'prod-croissant', categoryId: patisserie.id, name: 'Croissant', price: 12, points: 1 },
+    { id: 'prod-pain-choco', categoryId: patisserie.id, name: 'Pain au chocolat', price: 14, points: 1 },
+  ];
+  for (const p of demoProducts) {
+    await prisma.product.upsert({ where: { id: p.id }, update: {}, create: p });
+  }
 
   console.log('✔ Menu de démonstration créé');
 
