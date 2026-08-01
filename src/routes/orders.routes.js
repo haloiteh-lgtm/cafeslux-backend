@@ -175,14 +175,12 @@ router.delete('/:id', requireAuth, async (req, res) => {
       }
     }
 
-    const cancelled = await prisma.order.update({
-      where: { id: req.params.id },
-      data: { status: 'CANCELLED' },
-    });
+    const deletedId = req.params.id;
+    await prisma.order.delete({ where: { id: deletedId } });
 
-    req.app.get('io').emit('order:update', cancelled);
+    req.app.get('io').emit('order:deleted', { id: deletedId });
 
-    res.json({ ok: true, order: cancelled });
+    res.json({ ok: true, id: deletedId });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur', details: err.message });
   }
