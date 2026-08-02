@@ -15,18 +15,35 @@ async function main() {
 
   console.log(`✔ Compte Admin créé — PIN: ${adminPin}`);
 
-  // ── Demo categories + products (remplace-les par tes vrais produits) ──
-  const boissons = await prisma.category.upsert({
-    where: { id: 'cat-boissons' },
-    update: {},
-    create: { id: 'cat-boissons', name: 'Boissons Chaudes', icon: '☕', position: 1 },
-  });
+  // ── Full category list — matches the real "La Commande" customer menu ──
+  const categoryList = [
+    { id: 'cat-breakfast',    name: 'Breakfast',                  icon: '🍳', position: 1 },
+    { id: 'cat-coffees',      name: 'Espressos & Laits',           icon: '☕', position: 2 },
+    { id: 'cat-cremeux',      name: 'Les Crémeux',                 icon: '🥛', position: 3 },
+    { id: 'cat-infusions',    name: 'Infusions & Thés',            icon: '🍵', position: 4 },
+    { id: 'cat-jus',          name: 'Jus Purs & Boissons',         icon: '🥤', position: 5 },
+    { id: 'cat-signature',    name: 'Signature LUX',               icon: '⭐', position: 6 },
+    { id: 'cat-snacks',       name: 'Snacks',                      icon: '🥪', position: 7 },
+    { id: 'cat-crepes',       name: 'Crêpes & Pancakes',           icon: '🥞', position: 8 },
+    { id: 'cat-salades',      name: 'Salades',                     icon: '🥗', position: 9 },
+    { id: 'cat-pizzas',       name: 'Pizzas',                      icon: '🍕', position: 10 },
+    { id: 'cat-burgers',      name: 'Burgers, Tacos & Sandwichs',  icon: '🍔', position: 11 },
+    { id: 'cat-marocaine',    name: 'Cuisine Marocaine',           icon: '🫕', position: 12 },
+    { id: 'cat-grillades',    name: 'Grillades & Shawarma',        icon: '🔥', position: 13 },
+    { id: 'cat-gratins',      name: 'Gratins & Pâtes',             icon: '🍝', position: 14 },
+    { id: 'cat-patisseries',  name: 'Pâtisseries & Desserts',      icon: '🍮', position: 15 },
+    { id: 'cat-glaces',       name: 'Ice Cream & Glaces',          icon: '🍨', position: 16 },
+    { id: 'cat-marocfood',    name: 'Pâtisseries Marocaines',      icon: '🍪', position: 17 },
+    { id: 'cat-ftour',        name: 'Ftour & Menus Spéciaux',      icon: '🌙', position: 18 },
+  ];
+  const cats = {};
+  for (const c of categoryList) {
+    cats[c.id] = await prisma.category.upsert({ where: { id: c.id }, update: {}, create: c });
+  }
+  console.log(`✔ ${categoryList.length} catégories créées (correspondant au menu client réel)`);
 
-  const patisserie = await prisma.category.upsert({
-    where: { id: 'cat-patisserie' },
-    update: {},
-    create: { id: 'cat-patisserie', name: 'Pâtisserie', icon: '🥐', position: 2 },
-  });
+  const boissons = cats['cat-coffees'];
+  const patisserie = cats['cat-patisseries'];
 
   const demoProducts = [
     { id: 'prod-cafe-signature', categoryId: boissons.id, name: 'Café Lux Signature', price: 25, isSignature: true, points: 3 },
