@@ -9,10 +9,20 @@ router.get('/', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) =
 });
 
 router.post('/', requireAuth, requireRole('ADMIN'), async (req, res) => {
-  const { name, pin, role, phone, salary } = req.body;
+  const { name, pin, role, phone, salary, cin, startDate } = req.body;
   if (!name || !pin) return res.status(400).json({ error: 'Nom et PIN requis' });
   const pinHash = await bcrypt.hash(String(pin), 10);
-  const employee = await prisma.employee.create({ data: { name, pin: pinHash, role: role || 'STAFF', phone, salary } });
+  const employee = await prisma.employee.create({
+    data: {
+      name,
+      pin: pinHash,
+      role: (role || 'staff').toUpperCase(),
+      phone,
+      salary,
+      cin,
+      startDate: startDate ? new Date(startDate) : undefined,
+    },
+  });
   const { pin: _drop, ...safe } = employee;
   res.status(201).json(safe);
 });
@@ -20,6 +30,8 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req, res) => {
 router.patch('/:id', requireAuth, requireRole('ADMIN'), async (req, res) => {
   const data = { ...req.body };
   if (data.pin) data.pin = await bcrypt.hash(String(data.pin), 10);
+  if (data.role) data.role = data.role.toUpperCase();
+  if (data.startDate) data.startDate = new Date(data.startDate);
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data });
   const { pin: _drop, ...safe } = employee;
   res.json(safe);
