@@ -9,7 +9,7 @@ async function main() {
 
   await prisma.employee.upsert({
     where: { id: 'admin-seed' },
-    update: {},
+    update: { pin: pinHash },
     create: { id: 'admin-seed', name: 'Admin', pin: pinHash, role: 'ADMIN', phone: '212677717201' },
   });
 
