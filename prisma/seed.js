@@ -17,6 +17,7 @@ async function main() {
 
   // ── Full category list — matches the real "La Commande" customer menu ──
   const categoryList = [
+    { id: 'cat-offres',       name: 'Offres',                     icon: '🔥', position: 0 },
     { id: 'cat-breakfast',    name: 'Breakfast',                  icon: '🍳', position: 1 },
     { id: 'cat-coffees',      name: 'Espressos & Laits',           icon: '☕', position: 2 },
     { id: 'cat-cremeux',      name: 'Les Crémeux',                 icon: '🥛', position: 3 },
