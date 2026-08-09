@@ -17,6 +17,7 @@ router.get('/menu', async (req, res) => {
         id: p.id,
         name: p.name,
         price: p.price,
+        offerPrice: p.offerPrice,
         imageUrl: p.imageUrl,
         isSignature: p.isSignature,
         active: p.active,
@@ -49,22 +50,42 @@ router.delete('/categories/:id', requireAuth, requireRole('ADMIN', 'MANAGER'), a
   res.json({ ok: true });
 });
 
+router.get('/offers', async (req, res) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: { active: true, offerPrice: { not: null } },
+      include: { category: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json(products);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 router.get('/products', async (req, res) => {
   const products = await prisma.product.findMany({ include: { category: true } });
   res.json(products);
 });
 
 router.post('/products', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
-  const { name, price, categoryId, imageUrl, isSignature, points, stockQty } = req.body;
+  const { name, price, categoryId, imageUrl, isSignature, points, stockQty, offerPrice } = req.body;
   if (!name || price == null || !categoryId) return res.status(400).json({ error: 'name, price, categoryId requis' });
   const product = await prisma.product.create({
-    data: { name, price, categoryId, imageUrl, isSignature: !!isSignature, points: points || 0, stockQty },
+    data: {
+      name, price, categoryId, imageUrl, isSignature: !!isSignature, points: points || 0, stockQty,
+      offerPrice: (offerPrice === '' || offerPrice == null) ? null : parseFloat(offerPrice),
+    },
   });
   res.status(201).json(product);
 });
 
 router.patch('/products/:id', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
-  const product = await prisma.product.update({ where: { id: req.params.id }, data: req.body });
+  const data = { ...req.body };
+  if ('offerPrice' in data) {
+    data.offerPrice = (data.offerPrice === '' || data.offerPrice == null) ? null : parseFloat(data.offerPrice);
+  }
+  const product = await prisma.product.update({ where: { id: req.params.id }, data });
   res.json(product);
 });
 
