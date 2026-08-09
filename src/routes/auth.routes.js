@@ -9,11 +9,12 @@ router.post('/pin', async (req, res) => {
   try {
     const { pin } = req.body;
     if (!pin) return res.status(400).json({ error: 'Code PIN requis' });
+    const cleanPin = String(pin).trim();
 
     const employees = await prisma.employee.findMany({ where: { active: true } });
     let matched = null;
     for (const emp of employees) {
-      if (await bcrypt.compare(String(pin), emp.pin)) { matched = emp; break; }
+      if (await bcrypt.compare(cleanPin, emp.pin)) { matched = emp; break; }
     }
 
     if (!matched) return res.status(401).json({ error: 'Code PIN invalide' });
