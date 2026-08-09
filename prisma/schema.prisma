@@ -87,6 +87,7 @@ model Product {
   categoryId  String
   name        String
   price       Float
+  offerPrice  Float?    // prix réduit — quand rempli, le produit est affiché comme "Offre"
   imageUrl    String?
   isSignature Boolean   @default(false)
   active      Boolean   @default(true)
