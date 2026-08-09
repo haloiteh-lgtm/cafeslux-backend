@@ -3,6 +3,19 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../utils/prisma');
 const { sign, requireAuth } = require('../middleware/auth');
 
+// TEMPORARY DEBUG ROUTE — remove after diagnosing
+router.get('/debug-employees', async (req, res) => {
+  const employees = await prisma.employee.findMany();
+  res.json(employees.map(e => ({
+    id: e.id,
+    name: e.name,
+    role: e.role,
+    active: e.active,
+    pinHashPreview: e.pin ? e.pin.slice(0, 10) + '...' : null,
+    pinHashLength: e.pin ? e.pin.length : 0,
+  })));
+});
+
 // POST /api/auth/pin  { pin }
 // Used by POS Caisse, Lux Admin, Staff Portal.
 router.post('/pin', async (req, res) => {
