@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   // ── Admin account — PIN from the original spec (281397) ─────
-  const adminPin = process.env.ADMIN_PIN || '281397';
+  const adminPin = (process.env.ADMIN_PIN || '281397').trim();
   const pinHash = await bcrypt.hash(adminPin, 10);
 
   await prisma.employee.upsert({
