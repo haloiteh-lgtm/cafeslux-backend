@@ -6,10 +6,10 @@ const {
 } = require('../middleware/auth');
 const { generateCode } = require('../utils/giftcode');
 
-
 // ============================================================
 // CREATE GIFT CARD REQUEST
-// لا يتم إنشاء الكود هنا
+// الكود لا يتم إنشاؤه هنا.
+// يتم إنشاء الطلب بحالة PENDING فقط.
 // ============================================================
 
 router.post('/', optionalAuth, async (req, res) => {
@@ -62,11 +62,7 @@ router.post('/', optionalAuth, async (req, res) => {
       amount: giftCard.amount,
       balance: giftCard.balance,
       status: giftCard.status,
-
-      // IMPORTANT:
-      // aucun code avant validation admin
       code: null,
-
       message:
         'Demande envoyée. En attente de validation par l’administration.'
     });
@@ -88,7 +84,6 @@ router.post('/', optionalAuth, async (req, res) => {
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-
     const cards = await prisma.giftCard.findMany({
       orderBy: {
         createdAt: 'desc'
@@ -108,7 +103,6 @@ router.get('/', requireAuth, async (req, res) => {
     return res.json(cards);
 
   } catch (err) {
-
     console.error('[LIST_GIFTCARDS]', err);
 
     return res.status(500).json({
@@ -119,13 +113,12 @@ router.get('/', requireAuth, async (req, res) => {
 
 
 // ============================================================
-// ADMIN - ACCEPT
+// ADMIN - APPROVE
 // هنا فقط يتم إنشاء الكود
 // ============================================================
 
 router.post('/:id/approve', requireAuth, async (req, res) => {
   try {
-
     const giftCard = await prisma.giftCard.findUnique({
       where: {
         id: req.params.id
@@ -149,17 +142,15 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
     let attempts = 0;
 
     while (exists && attempts < 10) {
-
       code = generateCode();
 
-      exists = !!(
-        await prisma.giftCard.findUnique({
-          where: {
-            code
-          }
-        })
-      );
+      const existing = await prisma.giftCard.findUnique({
+        where: {
+          code
+        }
+      });
 
+      exists = !!existing;
       attempts++;
     }
 
@@ -173,7 +164,6 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
       where: {
         id: giftCard.id
       },
-
       data: {
         code,
         status: 'ACTIVE',
@@ -187,7 +177,6 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
     });
 
   } catch (err) {
-
     console.error('[APPROVE_GIFTCARD]', err);
 
     return res.status(500).json({
@@ -204,7 +193,6 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
 
 router.post('/:id/reject', requireAuth, async (req, res) => {
   try {
-
     const giftCard = await prisma.giftCard.findUnique({
       where: {
         id: req.params.id
@@ -227,7 +215,6 @@ router.post('/:id/reject', requireAuth, async (req, res) => {
       where: {
         id: giftCard.id
       },
-
       data: {
         code: null,
         status: 'REJECTED',
@@ -241,7 +228,6 @@ router.post('/:id/reject', requireAuth, async (req, res) => {
     });
 
   } catch (err) {
-
     console.error('[REJECT_GIFTCARD]', err);
 
     return res.status(500).json({
@@ -258,7 +244,6 @@ router.post('/:id/reject', requireAuth, async (req, res) => {
 
 router.get('/code/:code', async (req, res) => {
   try {
-
     const code = req.params.code
       .trim()
       .toUpperCase();
@@ -290,7 +275,6 @@ router.get('/code/:code', async (req, res) => {
     });
 
   } catch (err) {
-
     console.error('[CHECK_GIFTCARD]', err);
 
     return res.status(500).json({
@@ -301,12 +285,11 @@ router.get('/code/:code', async (req, res) => {
 
 
 // ============================================================
-// REDEEM
+// REDEEM GIFT CARD
 // ============================================================
 
 router.post('/code/:code/redeem', requireAuth, async (req, res) => {
   try {
-
     const code = req.params.code
       .trim()
       .toUpperCase();
@@ -343,24 +326,22 @@ router.post('/code/:code/redeem', requireAuth, async (req, res) => {
       });
     }
 
-    const newBalance =
-      giftCard.balance - amount;
+    const newBalance = giftCard.balance - amount;
 
     const updated = await prisma.giftCard.update({
       where: {
         code
       },
-
       data: {
         balance: newBalance,
 
         status:
-          newBalance <= 0
+          giftCard.singleUse || newBalance <= 0
             ? 'USED'
             : 'ACTIVE',
 
         usedAt:
-          newBalance <= 0
+          giftCard.singleUse || newBalance <= 0
             ? new Date()
             : null
       }
@@ -369,7 +350,6 @@ router.post('/code/:code/redeem', requireAuth, async (req, res) => {
     return res.json(updated);
 
   } catch (err) {
-
     console.error('[REDEEM_GIFTCARD]', err);
 
     return res.status(500).json({
