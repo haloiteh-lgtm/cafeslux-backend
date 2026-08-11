@@ -55,9 +55,11 @@ router.get('/me/orders', requireAuth, async (req, res) => {
 
 router.get('/me/giftcards', requireAuth, async (req, res) => {
   if (req.user.role !== 'CUSTOMER') return res.status(403).json({ error: 'Accès réservé aux clients' });
-  const cards = await prisma.giftCard.findMany({ where: { customerId: req.user.id } });
+  const cards = await prisma.giftCard.findMany({ where: { customerId: req.user.id }, orderBy: { createdAt: 'desc' } });
   res.json(cards.map(c => ({
-    code: c.code,
+    id: c.id,
+    code: c.code || null,
+    amount: c.amount,
     balance: c.balance,
     status: c.status.toLowerCase(),
     expires: c.createdAt,
