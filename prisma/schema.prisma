@@ -21,7 +21,7 @@ enum EmployeeRole {
 model Employee {
   id            String    @id @default(cuid())
   name          String
-  pin           String    // hashed 4-6 digit PIN
+  pin           String
   role          EmployeeRole @default(STAFF)
   phone         String?
   active        Boolean   @default(true)
@@ -87,12 +87,12 @@ model Product {
   categoryId  String
   name        String
   price       Float
-  offerPrice  Float?    // prix réduit — quand rempli, le produit est affiché comme "Offre"
+  offerPrice  Float?
   imageUrl    String?
   isSignature Boolean   @default(false)
   active      Boolean   @default(true)
-  points      Int       @default(0)   // loyalty points earned per unit sold
-  stockQty    Float?    // null = untracked
+  points      Int       @default(0)
+  stockQty    Float?
   orderItems  OrderItem[]
 }
 
@@ -100,11 +100,11 @@ model Product {
 // ORDERS
 // ─────────────────────────────────────────────
 enum OrderStatus {
-  PENDING     // Les Nouvelles — waiting for Confirmer
-  APPROVED    // moved after Confirmer, ticket printed
-  PREPARING   // KDS in progress
+  PENDING
+  APPROVED
+  PREPARING
   READY
-  COMPLETED   // removed from active lists
+  COMPLETED
   CANCELLED
 }
 
@@ -154,7 +154,7 @@ model Customer {
   phone         String    @unique
   email         String?
   passwordHash  String?
-  pointsTotal   Int       @default(0)  // lifetime earned
+  pointsTotal   Int       @default(0)
   pointsUsed    Int       @default(0)
   createdAt     DateTime  @default(now())
   orders        Order[]
@@ -166,24 +166,34 @@ model Customer {
 // GIFT CARDS
 // ─────────────────────────────────────────────
 enum GiftCardStatus {
+  PENDING
   ACTIVE
+  REJECTED
   USED
   EXPIRED
 }
 
 model GiftCard {
-  id          String    @id @default(cuid())
-  code        String    @unique
-  amount      Float
-  balance     Float
-  singleUse   Boolean   @default(true)
-  status      GiftCardStatus @default(ACTIVE)
-  buyerName   String?
-  buyerPhone  String?
-  customer    Customer? @relation(fields: [customerId], references: [id])
-  customerId  String?
-  createdAt   DateTime  @default(now())
-  usedAt      DateTime?
+  id             String         @id @default(cuid())
+  code           String?        @unique
+  amount         Float
+  balance        Float
+  singleUse      Boolean        @default(true)
+  status         GiftCardStatus @default(PENDING)
+
+  buyerName      String?
+  buyerPhone     String?
+  recipient      String?
+  message        String?
+  paymentMethod  String?
+
+  customer       Customer?      @relation(fields: [customerId], references: [id])
+  customerId     String?
+
+  createdAt      DateTime       @default(now())
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  usedAt         DateTime?
 }
 
 // ─────────────────────────────────────────────
@@ -208,7 +218,7 @@ model Reservation {
 }
 
 // ─────────────────────────────────────────────
-// EXPENSES (المصاريف — for Tableau de Bord)
+// EXPENSES
 // ─────────────────────────────────────────────
 model Expense {
   id        String   @id @default(cuid())
@@ -228,11 +238,11 @@ model Review {
   name       String?
   rating     Int
   comment    String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
-// GAMING ZONE (Snooker, Billard, PS5, PS4)
+// GAMING ZONE
 // ─────────────────────────────────────────────
 enum StationType {
   SNOOKER
@@ -248,7 +258,7 @@ enum StationStatus {
 
 model GamingStation {
   id        String        @id @default(cuid())
-  label     String        // ex: "Snooker", "Billard 1", "PS5", "PS4"
+  label     String
   type      StationType
   status    StationStatus @default(IDLE)
   sessions  GamingSession[]
@@ -266,13 +276,13 @@ model GamingSession {
   station       GamingStation @relation(fields: [stationId], references: [id])
   stationId     String
   playerName    String?
-  planLabel     String?   // ex: "1 heure", "Partie"
+  planLabel     String?
   totalPrice    Float
   paymentMethod String?
   paymentStatus String    @default("pending")
   status        GamingSessionStatus @default(ACTIVE)
   startedAt     DateTime  @default(now())
-  endsAt        DateTime? // null for flat-fee (snooker/billard) sessions ended manually
+  endsAt        DateTime?
   endedAt       DateTime?
   createdAt     DateTime  @default(now())
 }
