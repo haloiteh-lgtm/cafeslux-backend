@@ -19,37 +19,37 @@ enum EmployeeRole {
 }
 
 model Employee {
-  id              String           @id @default(cuid())
-  name            String
-  pin             String
-  role            EmployeeRole     @default(STAFF)
-  phone           String?
-  active          Boolean          @default(true)
-  salary          Float?           @default(0)
-  createdAt       DateTime         @default(now())
+  id            String    @id @default(cuid())
+  name          String
+  pin           String    // hashed 4-6 digit PIN
+  role          EmployeeRole @default(STAFF)
+  phone         String?
+  active        Boolean   @default(true)
+  salary        Float?    @default(0)
+  createdAt     DateTime  @default(now())
 
-  attendances     Attendance[]
-  payrollEntries  PayrollEntry[]
+  attendances   Attendance[]
+  payrollEntries PayrollEntry[]
   advanceRequests AdvanceRequest[]
-  orders          Order[]
+  orders        Order[]
 }
 
 model Attendance {
-  id         String   @id @default(cuid())
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  employeeId String
-  clockIn    DateTime @default(now())
-  clockOut   DateTime?
+  id          String    @id @default(cuid())
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  employeeId  String
+  clockIn     DateTime  @default(now())
+  clockOut    DateTime?
 }
 
 model PayrollEntry {
-  id         String   @id @default(cuid())
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  employeeId String
-  amount     Float
-  note       String?
-  paid       Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id          String    @id @default(cuid())
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  employeeId  String
+  amount      Float
+  note        String?
+  paid        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
 }
 
 enum AdvanceStatus {
@@ -59,14 +59,14 @@ enum AdvanceStatus {
 }
 
 model AdvanceRequest {
-  id           String        @id @default(cuid())
-  employee     Employee      @relation(fields: [employeeId], references: [id])
-  employeeId   String
-  amount       Float
-  reason       String?
-  status       AdvanceStatus @default(PENDING)
-  createdAt    DateTime      @default(now())
-  respondedAt  DateTime?
+  id          String    @id @default(cuid())
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  employeeId  String
+  amount      Float
+  reason      String?
+  status      AdvanceStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
 }
 
 // ─────────────────────────────────────────────
@@ -82,17 +82,17 @@ model Category {
 }
 
 model Product {
-  id          String      @id @default(cuid())
-  category    Category    @relation(fields: [categoryId], references: [id])
+  id          String    @id @default(cuid())
+  category    Category  @relation(fields: [categoryId], references: [id])
   categoryId  String
   name        String
   price       Float
-  offerPrice  Float?
+  offerPrice  Float?    // prix réduit — quand rempli, le produit est affiché comme "Offre"
   imageUrl    String?
-  isSignature Boolean     @default(false)
-  active      Boolean     @default(true)
-  points      Int         @default(0)
-  stockQty    Float?
+  isSignature Boolean   @default(false)
+  active      Boolean   @default(true)
+  points      Int       @default(0)   // loyalty points earned per unit sold
+  stockQty    Float?    // null = untracked
   orderItems  OrderItem[]
 }
 
@@ -100,11 +100,11 @@ model Product {
 // ORDERS
 // ─────────────────────────────────────────────
 enum OrderStatus {
-  PENDING
-  APPROVED
-  PREPARING
+  PENDING     // Les Nouvelles — waiting for Confirmer
+  APPROVED    // moved after Confirmer, ticket printed
+  PREPARING   // KDS in progress
   READY
-  COMPLETED
+  COMPLETED   // removed from active lists
   CANCELLED
 }
 
@@ -149,15 +149,14 @@ model OrderItem {
 // CUSTOMERS / LOYALTY
 // ─────────────────────────────────────────────
 model Customer {
-  id            String     @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String?
-  phone         String     @unique
+  phone         String    @unique
   email         String?
   passwordHash  String?
-  pointsTotal   Int        @default(0)
-  pointsUsed    Int        @default(0)
-  createdAt     DateTime   @default(now())
-
+  pointsTotal   Int       @default(0)  // lifetime earned
+  pointsUsed    Int       @default(0)
+  createdAt     DateTime  @default(now())
   orders        Order[]
   giftCards     GiftCard[]
   reviews       Review[]
@@ -167,36 +166,31 @@ model Customer {
 // GIFT CARDS
 // ─────────────────────────────────────────────
 enum GiftCardStatus {
-  PENDING
-  ACTIVE
+  PENDING   // demande carte cadeau "Espèce" — en attente de validation admin
+  ACTIVE    // approuvée par l'admin (ou payée en ligne) — code généré, utilisable
   USED
   EXPIRED
-  REJECTED
+  REJECTED  // refusée par l'admin — aucun code généré
 }
 
 model GiftCard {
-  id            String         @id @default(cuid())
-  code          String?        @unique
+  id            String    @id @default(cuid())
+  code          String?   @unique  // null tant que la demande "Espèce" n'est pas approuvée
   amount        Float
   balance       Float
-  singleUse     Boolean        @default(true)
-
-  status        GiftCardStatus @default(PENDING)
-
+  singleUse     Boolean   @default(true)
+  status        GiftCardStatus @default(ACTIVE)
   buyerName     String?
   buyerPhone    String?
-  recipient     String?
+  recipientName String?
   message       String?
-  paymentMethod String?
-
-  customer      Customer?      @relation(fields: [customerId], references: [id])
+  paymentMethod String?   @default("cash")
+  customer      Customer? @relation(fields: [customerId], references: [id])
   customerId    String?
-
-  createdAt     DateTime       @default(now())
-  approvedAt    DateTime?
-  rejectedAt    DateTime?
+  createdAt     DateTime  @default(now())
   usedAt        DateTime?
-  expiresAt     DateTime?
+  decidedAt     DateTime? // quand l'admin a accepté/refusé
+  decidedBy     String?   // id de l'employé qui a décidé
 }
 
 // ─────────────────────────────────────────────
@@ -209,43 +203,43 @@ enum ReservationStatus {
 }
 
 model Reservation {
-  id         String            @id @default(cuid())
-  name       String
-  phone      String
-  date       String
-  time       String
-  guests     Int               @default(2)
-  status     ReservationStatus @default(PENDING)
-  note       String?
-  createdAt  DateTime          @default(now())
+  id        String   @id @default(cuid())
+  name      String
+  phone     String
+  date      String
+  time      String
+  guests    Int      @default(2)
+  status    ReservationStatus @default(PENDING)
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
-// EXPENSES
+// EXPENSES (المصاريف — for Tableau de Bord)
 // ─────────────────────────────────────────────
 model Expense {
-  id         String   @id @default(cuid())
-  label      String
-  amount     Float
-  category   String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  label     String
+  amount    Float
+  category  String?
+  createdAt DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
 // REVIEWS
 // ─────────────────────────────────────────────
 model Review {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   customer   Customer? @relation(fields: [customerId], references: [id])
   customerId String?
   name       String?
   rating     Int
   comment    String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
-// GAMING ZONE
+// GAMING ZONE (Snooker, Billard, PS5, PS4)
 // ─────────────────────────────────────────────
 enum StationType {
   SNOOKER
@@ -260,12 +254,12 @@ enum StationStatus {
 }
 
 model GamingStation {
-  id         String          @id @default(cuid())
-  label      String
-  type       StationType
-  status     StationStatus   @default(IDLE)
-  sessions   GamingSession[]
-  createdAt  DateTime        @default(now())
+  id        String        @id @default(cuid())
+  label     String        // ex: "Snooker", "Billard 1", "PS5", "PS4"
+  type      StationType
+  status    StationStatus @default(IDLE)
+  sessions  GamingSession[]
+  createdAt DateTime      @default(now())
 }
 
 enum GamingSessionStatus {
@@ -275,17 +269,17 @@ enum GamingSessionStatus {
 }
 
 model GamingSession {
-  id            String              @id @default(cuid())
-  station       GamingStation       @relation(fields: [stationId], references: [id])
+  id            String    @id @default(cuid())
+  station       GamingStation @relation(fields: [stationId], references: [id])
   stationId     String
   playerName    String?
-  planLabel     String?
+  planLabel     String?   // ex: "1 heure", "Partie"
   totalPrice    Float
   paymentMethod String?
-  paymentStatus String              @default("pending")
+  paymentStatus String    @default("pending")
   status        GamingSessionStatus @default(ACTIVE)
-  startedAt     DateTime            @default(now())
-  endsAt        DateTime?
+  startedAt     DateTime  @default(now())
+  endsAt        DateTime? // null for flat-fee (snooker/billard) sessions ended manually
   endedAt       DateTime?
-  createdAt     DateTime            @default(now())
+  createdAt     DateTime  @default(now())
 }
