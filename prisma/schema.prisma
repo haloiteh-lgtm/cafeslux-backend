@@ -19,14 +19,14 @@ enum EmployeeRole {
 }
 
 model Employee {
-  id              String           @id @default(cuid())
+  id              String         @id @default(cuid())
   name            String
   pin             String
-  role            EmployeeRole     @default(STAFF)
+  role            EmployeeRole   @default(STAFF)
   phone           String?
-  active          Boolean          @default(true)
-  salary          Float?           @default(0)
-  createdAt       DateTime         @default(now())
+  active          Boolean        @default(true)
+  salary          Float?         @default(0)
+  createdAt       DateTime       @default(now())
 
   attendances     Attendance[]
   payrollEntries  PayrollEntry[]
@@ -35,21 +35,21 @@ model Employee {
 }
 
 model Attendance {
-  id          String    @id @default(cuid())
-  employee    Employee  @relation(fields: [employeeId], references: [id])
-  employeeId  String
-  clockIn     DateTime  @default(now())
-  clockOut    DateTime?
+  id         String   @id @default(cuid())
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  employeeId String
+  clockIn    DateTime @default(now())
+  clockOut   DateTime?
 }
 
 model PayrollEntry {
-  id          String    @id @default(cuid())
-  employee    Employee  @relation(fields: [employeeId], references: [id])
-  employeeId  String
-  amount      Float
-  note        String?
-  paid        Boolean   @default(false)
-  createdAt   DateTime  @default(now())
+  id         String   @id @default(cuid())
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  employeeId String
+  amount     Float
+  note       String?
+  paid       Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 enum AdvanceStatus {
@@ -97,67 +97,42 @@ model Product {
 
   orderItems  OrderItem[]
 
-  // NEW: هذا المنتج يمكن أن يكون داخل عدة Offers
+  // يسمح للمنتج بالدخول في عدة عروض
   offerItems  OfferProduct[]
 }
 
 // ─────────────────────────────────────────────
-// OFFERS
+// OFFERS — MULTI PRODUCT
 // ─────────────────────────────────────────────
-//
-// Offre واحدة يمكن أن تحتوي على عدد غير محدود
-// من المنتجات.
-//
-// مثال:
-//
-// Menu Duo
-// ├── Burger
-// ├── Coca
-// ├── Frites
-// └── Dessert
-//
-// ─────────────────────────────────────────────
-
 model Offer {
-  id          String         @id @default(cuid())
-  name        String
+  id              String         @id @default(cuid())
+  name            String
+  description     String?
+  discountPercent Float?
+  discountAmount  Float?
+  active          Boolean        @default(true)
+  startsAt        DateTime?
+  endsAt          DateTime?
 
-  // السعر النهائي للـOffer
-  price       Float
+  products        OfferProduct[]
 
-  active      Boolean        @default(true)
-
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  products    OfferProduct[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
 
 model OfferProduct {
-  id         String   @id @default(cuid())
+  id        String   @id @default(cuid())
 
-  offer      Offer    @relation(
-    fields: [offerId],
-    references: [id],
-    onDelete: Cascade
-  )
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offerId   String
 
-  offerId    String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
 
-  product    Product  @relation(
-    fields: [productId],
-    references: [id]
-  )
+  quantity  Int      @default(1)
 
-  productId  String
+  createdAt DateTime @default(now())
 
-  // إذا كان المنتج مكررًا داخل نفس العرض
-  // يمكن تحديد الكمية
-  quantity   Int      @default(1)
-
-  createdAt  DateTime @default(now())
-
-  // نفس المنتج لا يضاف مرتين كسطرين مختلفين
   @@unique([offerId, productId])
 }
 
@@ -194,14 +169,12 @@ model Order {
   items         OrderItem[]
 
   total         Float
-
   payMethod     String?
 
   employee      Employee?   @relation(fields: [employeeId], references: [id])
   employeeId    String?
 
   pointsEarned  Int         @default(0)
-
   giftCardUsed  String?
 
   createdAt     DateTime    @default(now())
@@ -211,19 +184,10 @@ model Order {
 model OrderItem {
   id        String   @id @default(cuid())
 
-  order     Order    @relation(
-    fields: [orderId],
-    references: [id],
-    onDelete: Cascade
-  )
-
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId   String
 
-  product   Product? @relation(
-    fields: [productId],
-    references: [id]
-  )
-
+  product   Product? @relation(fields: [productId], references: [id])
   productId String?
 
   name      String
@@ -235,20 +199,20 @@ model OrderItem {
 // CUSTOMERS / LOYALTY
 // ─────────────────────────────────────────────
 model Customer {
-  id            String    @id @default(cuid())
-  name          String?
-  phone         String    @unique
-  email         String?
-  passwordHash  String?
+  id           String    @id @default(cuid())
+  name         String?
+  phone        String    @unique
+  email        String?
+  passwordHash String?
 
-  pointsTotal   Int       @default(0)
-  pointsUsed    Int       @default(0)
+  pointsTotal  Int       @default(0)
+  pointsUsed   Int       @default(0)
 
-  createdAt     DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 
-  orders        Order[]
-  giftCards     GiftCard[]
-  reviews       Review[]
+  orders       Order[]
+  giftCards    GiftCard[]
+  reviews      Review[]
 }
 
 // ─────────────────────────────────────────────
@@ -264,14 +228,10 @@ enum GiftCardStatus {
 
 model GiftCard {
   id            String         @id @default(cuid())
-
   code          String?        @unique
-
   amount        Float
   balance       Float
-
   singleUse     Boolean        @default(true)
-
   status        GiftCardStatus @default(ACTIVE)
 
   buyerName     String?
@@ -281,17 +241,11 @@ model GiftCard {
 
   paymentMethod String?        @default("cash")
 
-  customer      Customer?      @relation(
-    fields: [customerId],
-    references: [id]
-  )
-
+  customer      Customer?      @relation(fields: [customerId], references: [id])
   customerId    String?
 
   createdAt     DateTime       @default(now())
-
   usedAt        DateTime?
-
   decidedAt     DateTime?
   decidedBy     String?
 }
@@ -307,19 +261,13 @@ enum ReservationStatus {
 
 model Reservation {
   id        String            @id @default(cuid())
-
   name      String
   phone     String
-
   date      String
   time      String
-
   guests    Int               @default(2)
-
   status    ReservationStatus @default(PENDING)
-
   note      String?
-
   createdAt DateTime          @default(now())
 }
 
@@ -328,11 +276,9 @@ model Reservation {
 // ─────────────────────────────────────────────
 model Expense {
   id        String   @id @default(cuid())
-
   label     String
   amount    Float
   category  String?
-
   createdAt DateTime @default(now())
 }
 
@@ -341,19 +287,11 @@ model Expense {
 // ─────────────────────────────────────────────
 model Review {
   id         String    @id @default(cuid())
-
-  customer   Customer? @relation(
-    fields: [customerId],
-    references: [id]
-  )
-
+  customer   Customer? @relation(fields: [customerId], references: [id])
   customerId String?
-
   name       String?
-
   rating     Int
   comment    String?
-
   createdAt  DateTime  @default(now())
 }
 
@@ -374,11 +312,8 @@ enum StationStatus {
 
 model GamingStation {
   id        String        @id @default(cuid())
-
   label     String
-
   type      StationType
-
   status    StationStatus @default(IDLE)
 
   sessions  GamingSession[]
@@ -395,27 +330,19 @@ enum GamingSessionStatus {
 model GamingSession {
   id            String              @id @default(cuid())
 
-  station       GamingStation       @relation(
-    fields: [stationId],
-    references: [id]
-  )
-
+  station       GamingStation       @relation(fields: [stationId], references: [id])
   stationId     String
 
   playerName    String?
   planLabel     String?
-
   totalPrice    Float
-
   paymentMethod String?
   paymentStatus String              @default("pending")
 
   status        GamingSessionStatus @default(ACTIVE)
 
   startedAt     DateTime            @default(now())
-
   endsAt        DateTime?
   endedAt       DateTime?
-
   createdAt     DateTime            @default(now())
 }
