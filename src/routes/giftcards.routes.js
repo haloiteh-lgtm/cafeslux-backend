@@ -2,14 +2,16 @@ const router = require('express').Router();
 const prisma = require('../utils/prisma');
 const {
   optionalAuth,
-  requireAuth
+  requireAuth,
+  requireRole
 } = require('../middleware/auth');
 const { generateCode } = require('../utils/giftcode');
 
+
 // ============================================================
 // CREATE GIFT CARD REQUEST
-// Le code n'est PAS créé ici.
-// La demande est créée avec le statut PENDING.
+// Espèces = PENDING
+// Aucun code n'est créé avant validation admin.
 // ============================================================
 
 router.post('/', optionalAuth, async (req, res) => {
@@ -19,6 +21,7 @@ router.post('/', optionalAuth, async (req, res) => {
       buyerName,
       buyerPhone,
       recipient,
+      recipientName,
       message,
       paymentMethod,
       singleUse
@@ -26,36 +29,50 @@ router.post('/', optionalAuth, async (req, res) => {
 
     const numericAmount = Number(amount);
 
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    if (
+      !Number.isFinite(numericAmount) ||
+      numericAmount < 20 ||
+      numericAmount > 2000
+    ) {
       return res.status(400).json({
-        error: 'Montant invalide'
+        error: 'Montant invalide (20 à 2000 MAD)'
       });
     }
 
-    let customerId = null;
+    const customerId =
+      req.user?.role === 'CUSTOMER'
+        ? req.user.id
+        : null;
 
-    if (req.user && req.user.role === 'CUSTOMER') {
-      customerId = req.user.id;
-    }
+    // Le frontend utilise "recipient",
+    // Prisma utilise "recipientName".
+    const finalRecipient =
+      recipientName ||
+      recipient ||
+      null;
 
     const giftCard = await prisma.giftCard.create({
       data: {
         code: null,
+
         amount: numericAmount,
         balance: numericAmount,
+
         singleUse: singleUse !== false,
 
+        // IMPORTANT :
+        // La demande reste en attente.
         status: 'PENDING',
 
         buyerName: buyerName || null,
         buyerPhone: buyerPhone || null,
 
-        // IMPORTANT :
-        // Prisma utilise recipientName et non recipient
-        recipientName: recipient || null,
+        recipientName: finalRecipient,
 
         message: message || null,
-        paymentMethod: paymentMethod || 'cash',
+
+        paymentMethod:
+          paymentMethod || 'cash',
 
         customerId
       }
@@ -66,13 +83,22 @@ router.post('/', optionalAuth, async (req, res) => {
       amount: giftCard.amount,
       balance: giftCard.balance,
       status: giftCard.status,
+
+      // Aucun code avant validation
       code: null,
+
+      recipient:
+        giftCard.recipientName || null,
+
       message:
         'Demande envoyée. En attente de validation par l’administration.'
     });
 
   } catch (err) {
-    console.error('[CREATE_GIFTCARD]', err);
+    console.error(
+      '[CREATE_GIFTCARD]',
+      err
+    );
 
     return res.status(500).json({
       error: 'Erreur serveur',
@@ -83,296 +109,456 @@ router.post('/', optionalAuth, async (req, res) => {
 
 
 // ============================================================
-// ADMIN - LIST GIFT CARDS
+// ADMIN / MANAGER
+// LIST GIFT CARDS
 // ============================================================
 
-router.get('/', requireAuth, async (req, res) => {
-  try {
-    const cards = await prisma.giftCard.findMany({
-      orderBy: {
-        createdAt: 'desc'
-      },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            email: true
+router.get(
+  '/',
+  requireAuth,
+  requireRole('ADMIN', 'MANAGER'),
+  async (req, res) => {
+    try {
+      const cards =
+        await prisma.giftCard.findMany({
+          orderBy: {
+            createdAt: 'desc'
+          },
+
+          include: {
+            customer: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                email: true
+              }
+            }
           }
+        });
+
+      // Compatibilité avec le frontend :
+      // recipientName -> recipient
+      return res.json(
+        cards.map(card => ({
+          ...card,
+
+          recipient:
+            card.recipientName || null
+        }))
+      );
+
+    } catch (err) {
+      console.error(
+        '[LIST_GIFTCARDS]',
+        err
+      );
+
+      return res.status(500).json({
+        error: 'Erreur serveur',
+        details: err.message
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// ADMIN / MANAGER
+// APPROVE
+// ============================================================
+
+router.post(
+  '/:id/approve',
+  requireAuth,
+  requireRole('ADMIN', 'MANAGER'),
+  async (req, res) => {
+    try {
+      const giftCard =
+        await prisma.giftCard.findUnique({
+          where: {
+            id: req.params.id
+          }
+        });
+
+      if (!giftCard) {
+        return res.status(404).json({
+          error: 'Carte cadeau introuvable'
+        });
+      }
+
+      if (giftCard.status !== 'PENDING') {
+        return res.status(400).json({
+          error:
+            'Cette demande a déjà été traitée'
+        });
+      }
+
+      // Générer un code unique
+      let code = null;
+
+      for (
+        let attempt = 0;
+        attempt < 20;
+        attempt++
+      ) {
+        const candidate =
+          generateCode();
+
+        const existing =
+          await prisma.giftCard.findUnique({
+            where: {
+              code: candidate
+            }
+          });
+
+        if (!existing) {
+          code = candidate;
+          break;
         }
       }
-    });
 
-    return res.json(cards);
-
-  } catch (err) {
-    console.error('[LIST_GIFTCARDS]', err);
-
-    return res.status(500).json({
-      error: 'Erreur serveur'
-    });
-  }
-});
-
-
-// ============================================================
-// ADMIN - APPROVE
-// Le code est créé UNIQUEMENT après validation admin.
-// ============================================================
-
-router.post('/:id/approve', requireAuth, async (req, res) => {
-  try {
-    const giftCard = await prisma.giftCard.findUnique({
-      where: {
-        id: req.params.id
+      if (!code) {
+        return res.status(500).json({
+          error:
+            'Impossible de générer le code'
+        });
       }
-    });
 
-    if (!giftCard) {
-      return res.status(404).json({
-        error: 'Carte cadeau introuvable'
+      const updated =
+        await prisma.giftCard.update({
+          where: {
+            id: giftCard.id
+          },
+
+          data: {
+            code,
+
+            // La carte devient utilisable
+            status: 'ACTIVE',
+
+            // Prisma utilise decidedAt
+            decidedAt: new Date(),
+
+            decidedBy:
+              req.user.id
+          }
+        });
+
+      return res.json({
+        success: true,
+
+        giftCard: {
+          ...updated,
+
+          recipient:
+            updated.recipientName || null
+        }
+      });
+
+    } catch (err) {
+      console.error(
+        '[APPROVE_GIFTCARD]',
+        err
+      );
+
+      return res.status(500).json({
+        error: 'Erreur serveur',
+        details: err.message
       });
     }
+  }
+);
 
-    if (giftCard.status !== 'PENDING') {
+
+// ============================================================
+// ADMIN / MANAGER
+// REJECT
+// ============================================================
+
+router.post(
+  '/:id/reject',
+  requireAuth,
+  requireRole('ADMIN', 'MANAGER'),
+  async (req, res) => {
+    try {
+      const giftCard =
+        await prisma.giftCard.findUnique({
+          where: {
+            id: req.params.id
+          }
+        });
+
+      if (!giftCard) {
+        return res.status(404).json({
+          error: 'Carte cadeau introuvable'
+        });
+      }
+
+      if (giftCard.status !== 'PENDING') {
+        return res.status(400).json({
+          error:
+            'Cette demande a déjà été traitée'
+        });
+      }
+
+      const updated =
+        await prisma.giftCard.update({
+          where: {
+            id: giftCard.id
+          },
+
+          data: {
+            code: null,
+
+            status: 'REJECTED',
+
+            // Prisma utilise decidedAt
+            decidedAt: new Date(),
+
+            decidedBy:
+              req.user.id
+          }
+        });
+
+      return res.json({
+        success: true,
+
+        giftCard: {
+          ...updated,
+
+          recipient:
+            updated.recipientName || null
+        }
+      });
+
+    } catch (err) {
+      console.error(
+        '[REJECT_GIFTCARD]',
+        err
+      );
+
+      return res.status(500).json({
+        error: 'Erreur serveur',
+        details: err.message
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// CLIENT
+// CHECK REQUEST STATUS
+// ============================================================
+
+router.get(
+  '/status/:id',
+  async (req, res) => {
+    try {
+      const giftCard =
+        await prisma.giftCard.findUnique({
+          where: {
+            id: req.params.id
+          }
+        });
+
+      if (!giftCard) {
+        return res.status(404).json({
+          error: 'Demande introuvable'
+        });
+      }
+
+      return res.json({
+        id: giftCard.id,
+
+        status: giftCard.status,
+
+        amount: giftCard.amount,
+
+        recipient:
+          giftCard.recipientName || null,
+
+        // Le code est caché tant que
+        // l'admin n'a pas accepté.
+        code:
+          giftCard.status === 'ACTIVE'
+            ? giftCard.code
+            : null
+      });
+
+    } catch (err) {
+      console.error(
+        '[GIFTCARD_STATUS]',
+        err
+      );
+
+      return res.status(500).json({
+        error: 'Erreur serveur',
+        details: err.message
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// CHECK GIFT CARD BALANCE
+//
+// Supporte les DEUX URLs:
+//
+// /api/giftcards/code/LUX-XXXX
+//
+// ET
+//
+// /api/giftcards/LUX-XXXX
+//
+// Le deuxième est utilisé actuellement
+// par le frontend.
+// ============================================================
+
+async function checkGiftCardByCode(
+  req,
+  res
+) {
+  try {
+    const code =
+      decodeURIComponent(
+        req.params.code || ''
+      )
+        .trim()
+        .toUpperCase();
+
+    if (!code) {
       return res.status(400).json({
-        error: 'Cette demande a déjà été traitée'
+        error: 'Code requis'
       });
     }
 
-    let code = null;
-    let exists = true;
-    let attempts = 0;
-
-    while (exists && attempts < 10) {
-      code = generateCode();
-
-      const existing = await prisma.giftCard.findUnique({
+    const giftCard =
+      await prisma.giftCard.findUnique({
         where: {
           code
         }
       });
 
-      exists = !!existing;
-      attempts++;
-    }
-
-    if (exists || !code) {
-      return res.status(500).json({
-        error: 'Impossible de générer le code'
-      });
-    }
-
-    const updated = await prisma.giftCard.update({
-      where: {
-        id: giftCard.id
-      },
-      data: {
-        code,
-        status: 'ACTIVE',
-
-        // IMPORTANT :
-        // Prisma utilise decidedAt
-        decidedAt: new Date(),
-
-        // Si l'utilisateur connecté est disponible,
-        // on garde également l'identifiant du décideur.
-        decidedBy: req.user?.id || null
-      }
-    });
-
-    return res.json({
-      success: true,
-      giftCard: updated
-    });
-
-  } catch (err) {
-    console.error('[APPROVE_GIFTCARD]', err);
-
-    return res.status(500).json({
-      error: 'Erreur serveur',
-      details: err.message
-    });
-  }
-});
-
-
-// ============================================================
-// ADMIN - REJECT
-// ============================================================
-
-router.post('/:id/reject', requireAuth, async (req, res) => {
-  try {
-    const giftCard = await prisma.giftCard.findUnique({
-      where: {
-        id: req.params.id
-      }
-    });
-
     if (!giftCard) {
       return res.status(404).json({
-        error: 'Carte cadeau introuvable'
+        error:
+          'Carte cadeau introuvable'
       });
     }
 
-    if (giftCard.status !== 'PENDING') {
+    if (giftCard.status !== 'ACTIVE') {
       return res.status(400).json({
-        error: 'Cette demande a déjà été traitée'
-      });
-    }
-
-    const updated = await prisma.giftCard.update({
-      where: {
-        id: giftCard.id
-      },
-      data: {
-        code: null,
-        status: 'REJECTED',
-
-        // IMPORTANT :
-        // Prisma utilise decidedAt
-        decidedAt: new Date(),
-
-        decidedBy: req.user?.id || null
-      }
-    });
-
-    return res.json({
-      success: true,
-      giftCard: updated
-    });
-
-  } catch (err) {
-    console.error('[REJECT_GIFTCARD]', err);
-
-    return res.status(500).json({
-      error: 'Erreur serveur',
-      details: err.message
-    });
-  }
-});
-
-
-// ============================================================
-// CHECK REQUEST STATUS
-// Le code reste caché tant que l'admin n'a pas accepté.
-// ============================================================
-
-router.get('/status/:id', async (req, res) => {
-  try {
-    const giftCard = await prisma.giftCard.findUnique({
-      where: {
-        id: req.params.id
-      }
-    });
-
-    if (!giftCard) {
-      return res.status(404).json({
-        error: 'Demande introuvable'
+        error:
+          'Carte cadeau non active'
       });
     }
 
     return res.json({
       id: giftCard.id,
-      status: giftCard.status,
-      amount: giftCard.amount,
 
-      // Le code n'est visible qu'après ACTIVE
-      code: giftCard.status === 'ACTIVE'
-        ? giftCard.code
-        : null
-    });
-
-  } catch (err) {
-    console.error('[GIFTCARD_STATUS]', err);
-
-    return res.status(500).json({
-      error: 'Erreur serveur'
-    });
-  }
-});
-
-
-// ============================================================
-// CHECK GIFT CARD
-// ============================================================
-
-router.get('/code/:code', async (req, res) => {
-  try {
-    const code = req.params.code
-      .trim()
-      .toUpperCase();
-
-    const giftCard = await prisma.giftCard.findUnique({
-      where: {
-        code
-      }
-    });
-
-    if (!giftCard) {
-      return res.status(404).json({
-        error: 'Carte cadeau introuvable'
-      });
-    }
-
-    if (giftCard.status !== 'ACTIVE') {
-      return res.status(400).json({
-        error: 'Carte cadeau non active'
-      });
-    }
-
-    return res.json({
       code: giftCard.code,
+
       amount: giftCard.amount,
+
       balance: giftCard.balance,
+
       status: giftCard.status,
-      singleUse: giftCard.singleUse
+
+      singleUse:
+        giftCard.singleUse
     });
 
   } catch (err) {
-    console.error('[CHECK_GIFTCARD]', err);
+    console.error(
+      '[CHECK_GIFTCARD]',
+      err
+    );
 
     return res.status(500).json({
-      error: 'Erreur serveur'
+      error: 'Erreur serveur',
+      details: err.message
     });
   }
-});
+}
+
+
+// Ancien endpoint
+router.get(
+  '/code/:code',
+  checkGiftCardByCode
+);
+
+// Endpoint utilisé par
+// offres / menu / mon-espace
+router.get(
+  '/:code',
+  checkGiftCardByCode
+);
 
 
 // ============================================================
 // REDEEM GIFT CARD
+//
+// Supporte:
+//
+// /api/giftcards/code/CODE/redeem
+//
+// ET
+//
+// /api/giftcards/CODE/redeem
 // ============================================================
 
-router.post('/code/:code/redeem', requireAuth, async (req, res) => {
+async function redeemGiftCard(
+  req,
+  res
+) {
   try {
-    const code = req.params.code
-      .trim()
-      .toUpperCase();
+    const code =
+      decodeURIComponent(
+        req.params.code || ''
+      )
+        .trim()
+        .toUpperCase();
 
-    const amount = Number(req.body.amount);
+    const amount =
+      Number(req.body.amount);
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!code) {
+      return res.status(400).json({
+        error: 'Code requis'
+      });
+    }
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
       return res.status(400).json({
         error: 'Montant invalide'
       });
     }
 
-    const giftCard = await prisma.giftCard.findUnique({
-      where: {
-        code
-      }
-    });
+    const giftCard =
+      await prisma.giftCard.findUnique({
+        where: {
+          code
+        }
+      });
 
     if (!giftCard) {
       return res.status(404).json({
-        error: 'Carte cadeau introuvable'
+        error:
+          'Carte cadeau introuvable'
       });
     }
 
     if (giftCard.status !== 'ACTIVE') {
       return res.status(400).json({
-        error: 'Carte cadeau non active'
+        error:
+          'Carte cadeau non active'
       });
     }
 
@@ -382,38 +568,78 @@ router.post('/code/:code/redeem', requireAuth, async (req, res) => {
       });
     }
 
-    const newBalance = giftCard.balance - amount;
+    const newBalance =
+      Math.max(
+        0,
+        giftCard.balance - amount
+      );
 
-    const updated = await prisma.giftCard.update({
-      where: {
-        code
-      },
-      data: {
-        balance: newBalance,
+    const fullyUsed =
+      giftCard.singleUse ||
+      newBalance <= 0;
 
-        status:
-          giftCard.singleUse || newBalance <= 0
-            ? 'USED'
-            : 'ACTIVE',
+    const updated =
+      await prisma.giftCard.update({
+        where: {
+          id: giftCard.id
+        },
 
-        usedAt:
-          giftCard.singleUse || newBalance <= 0
-            ? new Date()
-            : null
-      }
+        data: {
+          balance: newBalance,
+
+          status:
+            fullyUsed
+              ? 'USED'
+              : 'ACTIVE',
+
+          usedAt:
+            fullyUsed
+              ? new Date()
+              : null
+        }
+      });
+
+    return res.json({
+      success: true,
+
+      id: updated.id,
+
+      code: updated.code,
+
+      amount: updated.amount,
+
+      balance: updated.balance,
+
+      status: updated.status
     });
 
-    return res.json(updated);
-
   } catch (err) {
-    console.error('[REDEEM_GIFTCARD]', err);
+    console.error(
+      '[REDEEM_GIFTCARD]',
+      err
+    );
 
     return res.status(500).json({
       error: 'Erreur serveur',
       details: err.message
     });
   }
-});
+}
+
+
+// Ancien endpoint
+router.post(
+  '/code/:code/redeem',
+  requireAuth,
+  redeemGiftCard
+);
+
+// Endpoint utilisé par POS / mon-espace
+router.post(
+  '/:code/redeem',
+  requireAuth,
+  redeemGiftCard
+);
 
 
 module.exports = router;
