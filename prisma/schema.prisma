@@ -10,7 +10,6 @@ datasource db {
 // ─────────────────────────────────────────────
 // AUTH / STAFF
 // ─────────────────────────────────────────────
-
 enum EmployeeRole {
   ADMIN
   MANAGER
@@ -20,19 +19,19 @@ enum EmployeeRole {
 }
 
 model Employee {
-  id               String           @id @default(cuid())
-  name             String
-  pin              String
-  role             EmployeeRole     @default(STAFF)
-  phone            String?
-  active           Boolean          @default(true)
-  salary           Float?           @default(0)
-  createdAt        DateTime         @default(now())
+  id            String    @id @default(cuid())
+  name          String
+  pin           String    // hashed 4-6 digit PIN
+  role          EmployeeRole @default(STAFF)
+  phone         String?
+  active        Boolean   @default(true)
+  salary        Float?    @default(0)
+  createdAt     DateTime  @default(now())
 
-  attendances      Attendance[]
-  payrollEntries   PayrollEntry[]
-  advanceRequests  AdvanceRequest[]
-  orders           Order[]
+  attendances   Attendance[]
+  payrollEntries PayrollEntry[]
+  advanceRequests AdvanceRequest[]
+  orders        Order[]
 }
 
 model Attendance {
@@ -60,27 +59,25 @@ enum AdvanceStatus {
 }
 
 model AdvanceRequest {
-  id          String         @id @default(cuid())
-  employee    Employee       @relation(fields: [employeeId], references: [id])
+  id          String    @id @default(cuid())
+  employee    Employee  @relation(fields: [employeeId], references: [id])
   employeeId  String
   amount      Float
   reason      String?
-  status      AdvanceStatus  @default(PENDING)
-  createdAt   DateTime       @default(now())
+  status      AdvanceStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
   respondedAt DateTime?
 }
 
 // ─────────────────────────────────────────────
 // MENU
 // ─────────────────────────────────────────────
-
 model Category {
   id        String    @id @default(cuid())
   name      String
   icon      String?
   position  Int       @default(0)
   active    Boolean   @default(true)
-
   products  Product[]
 }
 
@@ -88,25 +85,17 @@ model Product {
   id          String    @id @default(cuid())
   category    Category  @relation(fields: [categoryId], references: [id])
   categoryId  String
-
   name        String
   price       Float
-
-  // Ancien système de prix promotionnel.
-  // Conservé pour ne rien casser.
-  offerPrice  Float?
-
+  offerPrice  Float?    // prix réduit — quand rempli, le produit est affiché comme "Offre"
   imageUrl    String?
   isSignature Boolean   @default(false)
   active      Boolean   @default(true)
-
-  points      Int       @default(0)
-  stockQty    Float?
-
+  points      Int       @default(0)   // loyalty points earned per unit sold
+  stockQty    Float?    // null = untracked
   orderItems  OrderItem[]
 
-  // Nouveau système : un produit peut être
-  // présent dans plusieurs offres.
+  // Offers auxquelles ce produit appartient
   offers      OfferProduct[]
 }
 
@@ -114,62 +103,39 @@ model Product {
 // OFFERS
 // ─────────────────────────────────────────────
 //
-// Une offre peut contenir autant de produits
-// que nécessaire.
+// Une offre peut contenir plusieurs produits.
 //
 // Exemple :
-//
 // Offre Été
 // ├── Cappuccino
 // ├── Crêpe
 // ├── Jus
 // └── Cheesecake
 //
-// Prix normal : 100 MAD
-// Prix offre  : 75 MAD
-//
+// Le nombre de produits est illimité.
+// Le prix est le prix final de l'offre.
 // ─────────────────────────────────────────────
-
 model Offer {
-  id          String         @id @default(cuid())
+  id        String         @id @default(cuid())
+  name      String
+  price     Float
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
-  name        String
-
-  // Prix final de l'offre
-  price       Float
-
-  active      Boolean        @default(true)
-
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  products    OfferProduct[]
+  products  OfferProduct[]
 }
 
-// ─────────────────────────────────────────────
-// OFFER PRODUCTS
-// ─────────────────────────────────────────────
-
 model OfferProduct {
-  id         String   @id @default(cuid())
+  id        String  @id @default(cuid())
 
-  offer      Offer    @relation(
-    fields: [offerId],
-    references: [id],
-    onDelete: Cascade
-  )
+  offer     Offer   @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offerId   String
 
-  offerId    String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
 
-  product    Product  @relation(
-    fields: [productId],
-    references: [id]
-  )
-
-  productId  String
-
-  // Quantité de ce produit dans l'offre
-  quantity   Int      @default(1)
+  quantity  Int     @default(1)
 
   @@unique([offerId, productId])
 }
@@ -177,13 +143,12 @@ model OfferProduct {
 // ─────────────────────────────────────────────
 // ORDERS
 // ─────────────────────────────────────────────
-
 enum OrderStatus {
-  PENDING
-  APPROVED
-  PREPARING
+  PENDING     // Les Nouvelles — waiting for Confirmer
+  APPROVED    // moved after Confirmer, ticket printed
+  PREPARING   // KDS in progress
   READY
-  COMPLETED
+  COMPLETED   // removed from active lists
   CANCELLED
 }
 
@@ -198,71 +163,44 @@ model Order {
   id            String      @id @default(cuid())
   source        OrderSource @default(menu)
   status        OrderStatus @default(PENDING)
-
   customer      Customer?   @relation(fields: [customerId], references: [id])
   customerId    String?
-
   customerName  String?
   customerPhone String?
-
   items         OrderItem[]
-
   total         Float
-
   payMethod     String?
-
   employee      Employee?   @relation(fields: [employeeId], references: [id])
   employeeId    String?
-
   pointsEarned  Int         @default(0)
-
   giftCardUsed  String?
-
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
 
 model OrderItem {
   id        String   @id @default(cuid())
-
-  order     Order    @relation(
-    fields: [orderId],
-    references: [id],
-    onDelete: Cascade
-  )
-
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId   String
-
-  product   Product? @relation(
-    fields: [productId],
-    references: [id]
-  )
-
+  product   Product? @relation(fields: [productId], references: [id])
   productId String?
-
   name      String
-
   price     Float
-
   qty       Int      @default(1)
 }
 
 // ─────────────────────────────────────────────
 // CUSTOMERS / LOYALTY
 // ─────────────────────────────────────────────
-
 model Customer {
   id            String    @id @default(cuid())
   name          String?
   phone         String    @unique
   email         String?
   passwordHash  String?
-
-  pointsTotal   Int       @default(0)
+  pointsTotal   Int       @default(0)  // lifetime earned
   pointsUsed    Int       @default(0)
-
   createdAt     DateTime  @default(now())
-
   orders        Order[]
   giftCards     GiftCard[]
   reviews       Review[]
@@ -271,53 +209,37 @@ model Customer {
 // ─────────────────────────────────────────────
 // GIFT CARDS
 // ─────────────────────────────────────────────
-
 enum GiftCardStatus {
-  PENDING
-  ACTIVE
+  PENDING   // demande carte cadeau "Espèce" — en attente de validation admin
+  ACTIVE    // approuvée par l'admin (ou payée en ligne) — code généré, utilisable
   USED
   EXPIRED
-  REJECTED
+  REJECTED  // refusée par l'admin — aucun code généré
 }
 
 model GiftCard {
   id            String         @id @default(cuid())
-
-  code          String?        @unique
-
+  code          String?        @unique  // null tant que la demande "Espèce" n'est pas approuvée
   amount        Float
   balance       Float
-
   singleUse     Boolean        @default(true)
-
   status        GiftCardStatus @default(ACTIVE)
-
   buyerName     String?
   buyerPhone    String?
   recipientName String?
   message       String?
-
   paymentMethod String?        @default("cash")
-
-  customer      Customer?      @relation(
-    fields: [customerId],
-    references: [id]
-  )
-
+  customer      Customer?      @relation(fields: [customerId], references: [id])
   customerId    String?
-
   createdAt     DateTime       @default(now())
-
   usedAt        DateTime?
-
-  decidedAt     DateTime?
-  decidedBy     String?
+  decidedAt     DateTime?      // quand l'admin a accepté/refusé
+  decidedBy     String?        // id de l'employé qui a décidé
 }
 
 // ─────────────────────────────────────────────
 // RESERVATIONS
 // ─────────────────────────────────────────────
-
 enum ReservationStatus {
   PENDING
   CONFIRMED
@@ -325,63 +247,44 @@ enum ReservationStatus {
 }
 
 model Reservation {
-  id        String            @id @default(cuid())
-
+  id        String   @id @default(cuid())
   name      String
   phone     String
-
   date      String
   time      String
-
-  guests    Int               @default(2)
-
+  guests    Int      @default(2)
   status    ReservationStatus @default(PENDING)
-
   note      String?
-
-  createdAt DateTime          @default(now())
+  createdAt DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
-// EXPENSES
+// EXPENSES (المصاريف — for Tableau de Bord)
 // ─────────────────────────────────────────────
-
 model Expense {
   id        String   @id @default(cuid())
-
   label     String
   amount    Float
   category  String?
-
   createdAt DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
 // REVIEWS
 // ─────────────────────────────────────────────
-
 model Review {
-  id         String    @id @default(cuid())
-
-  customer   Customer? @relation(
-    fields: [customerId],
-    references: [id]
-  )
-
+  id         String   @id @default(cuid())
+  customer   Customer? @relation(fields: [customerId], references: [id])
   customerId String?
-
   name       String?
-
   rating     Int
   comment    String?
-
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 }
 
 // ─────────────────────────────────────────────
-// GAMING ZONE
+// GAMING ZONE (Snooker, Billard, PS5, PS4)
 // ─────────────────────────────────────────────
-
 enum StationType {
   SNOOKER
   BILLARD
@@ -396,15 +299,10 @@ enum StationStatus {
 
 model GamingStation {
   id        String        @id @default(cuid())
-
-  label     String
-
+  label     String        // ex: "Snooker", "Billard 1", "PS5", "PS4"
   type      StationType
-
   status    StationStatus @default(IDLE)
-
   sessions  GamingSession[]
-
   createdAt DateTime      @default(now())
 }
 
@@ -415,29 +313,17 @@ enum GamingSessionStatus {
 }
 
 model GamingSession {
-  id            String              @id @default(cuid())
-
-  station       GamingStation       @relation(
-    fields: [stationId],
-    references: [id]
-  )
-
+  id            String    @id @default(cuid())
+  station       GamingStation @relation(fields: [stationId], references: [id])
   stationId     String
-
   playerName    String?
-  planLabel     String?
-
+  planLabel     String?   // ex: "1 heure", "Partie"
   totalPrice    Float
-
   paymentMethod String?
-  paymentStatus String              @default("pending")
-
+  paymentStatus String    @default("pending")
   status        GamingSessionStatus @default(ACTIVE)
-
-  startedAt     DateTime            @default(now())
-
-  endsAt        DateTime?
+  startedAt     DateTime  @default(now())
+  endsAt        DateTime? // null for flat-fee (snooker/billard) sessions ended manually
   endedAt       DateTime?
-
-  createdAt     DateTime            @default(now())
+  createdAt     DateTime  @default(now())
 }
