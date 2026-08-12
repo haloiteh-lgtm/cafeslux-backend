@@ -8,8 +8,8 @@ const { generateCode } = require('../utils/giftcode');
 
 // ============================================================
 // CREATE GIFT CARD REQUEST
-// الكود لا يتم إنشاؤه هنا.
-// يتم إنشاء الطلب بحالة PENDING فقط.
+// Le code n'est PAS créé ici.
+// La demande est créée avec le statut PENDING.
 // ============================================================
 
 router.post('/', optionalAuth, async (req, res) => {
@@ -49,7 +49,11 @@ router.post('/', optionalAuth, async (req, res) => {
 
         buyerName: buyerName || null,
         buyerPhone: buyerPhone || null,
-        recipient: recipient || null,
+
+        // IMPORTANT :
+        // Prisma utilise recipientName et non recipient
+        recipientName: recipient || null,
+
         message: message || null,
         paymentMethod: paymentMethod || 'cash',
 
@@ -114,7 +118,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // ============================================================
 // ADMIN - APPROVE
-// هنا فقط يتم إنشاء الكود
+// Le code est créé UNIQUEMENT après validation admin.
 // ============================================================
 
 router.post('/:id/approve', requireAuth, async (req, res) => {
@@ -167,7 +171,14 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
       data: {
         code,
         status: 'ACTIVE',
-        approvedAt: new Date()
+
+        // IMPORTANT :
+        // Prisma utilise decidedAt
+        decidedAt: new Date(),
+
+        // Si l'utilisateur connecté est disponible,
+        // on garde également l'identifiant du décideur.
+        decidedBy: req.user?.id || null
       }
     });
 
@@ -218,7 +229,12 @@ router.post('/:id/reject', requireAuth, async (req, res) => {
       data: {
         code: null,
         status: 'REJECTED',
-        rejectedAt: new Date()
+
+        // IMPORTANT :
+        // Prisma utilise decidedAt
+        decidedAt: new Date(),
+
+        decidedBy: req.user?.id || null
       }
     });
 
@@ -239,33 +255,41 @@ router.post('/:id/reject', requireAuth, async (req, res) => {
 
 
 // ============================================================
-// CHECK REQUEST STATUS (by request id — pas de code exposé
-// tant que le statut n'est pas ACTIVE)
-// Utilisé par le client pour suivre sa demande "Carte Cadeau
-// Espèces" après l'avoir envoyée, sans exposer le code avant
-// validation admin.
+// CHECK REQUEST STATUS
+// Le code reste caché tant que l'admin n'a pas accepté.
 // ============================================================
 
 router.get('/status/:id', async (req, res) => {
   try {
     const giftCard = await prisma.giftCard.findUnique({
-      where: { id: req.params.id }
+      where: {
+        id: req.params.id
+      }
     });
 
     if (!giftCard) {
-      return res.status(404).json({ error: 'Demande introuvable' });
+      return res.status(404).json({
+        error: 'Demande introuvable'
+      });
     }
 
     return res.json({
       id: giftCard.id,
       status: giftCard.status,
       amount: giftCard.amount,
-      code: giftCard.status === 'ACTIVE' ? giftCard.code : null
+
+      // Le code n'est visible qu'après ACTIVE
+      code: giftCard.status === 'ACTIVE'
+        ? giftCard.code
+        : null
     });
 
   } catch (err) {
     console.error('[GIFTCARD_STATUS]', err);
-    return res.status(500).json({ error: 'Erreur serveur' });
+
+    return res.status(500).json({
+      error: 'Erreur serveur'
+    });
   }
 });
 
