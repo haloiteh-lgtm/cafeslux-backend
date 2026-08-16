@@ -2,8 +2,14 @@ const router = require('express').Router();
 const prisma = require('../utils/prisma');
 const { optionalAuth, requireAuth, requireRole } = require('../middleware/auth');
 
+// ─────────────────────────────────────────────────────────────
 // Modes de paiement acceptés
-const PAY_METHODS = ['cash', 'card', 'paypal'];
+//   cash      → Espèces          : ATTEND la validation d'un admin
+//   tpe/card  → Carte Bancaire   : validé immédiatement
+//   paypal    → PayPal           : validé immédiatement
+//   gift_card → Carte Cadeau LUX : validé immédiatement
+// ─────────────────────────────────────────────────────────────
+const PAY_METHODS = ['cash', 'tpe', 'card', 'paypal', 'gift_card'];
 
 function computePoints(items, total) {
   const perProduct = items.reduce((sum, i) => sum + (i.points || 0) * (i.qty || 1), 0);
@@ -107,9 +113,11 @@ router.post('/', optionalAuth, async (req, res) => {
     }
 
     const io = req.app.get('io');
-    io.emit('order:new', order);
-    // Notification dédiée au Dashboard admin
-    if (isCash) io.emit('order:pending-approval', order);
+    if (io) {
+      io.emit('order:new', order);
+      // Notification dédiée au Dashboard admin
+      if (isCash) io.emit('order:pending-approval', order);
+    }
 
     res.status(201).json(order);
   } catch (err) {
@@ -147,7 +155,7 @@ router.get('/', requireAuth, async (req, res) => {
   const orders = await prisma.order.findMany({
     where,
     include: { items: true },
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: awaiting ? 'asc' : 'desc' },
     take,
   });
   res.json(orders);
@@ -197,8 +205,10 @@ router.post('/:id/approve', requireAuth, requireRole('ADMIN', 'MANAGER'), async 
     });
 
     const io = req.app.get('io');
-    io.emit('order:approved', order);
-    io.emit('order:update', order);
+    if (io) {
+      io.emit('order:approved', order);
+      io.emit('order:update', order);
+    }
 
     res.json(order);
   } catch (err) {
@@ -227,8 +237,10 @@ router.post('/:id/reject', requireAuth, requireRole('ADMIN', 'MANAGER'), async (
     });
 
     const io = req.app.get('io');
-    io.emit('order:rejected', order);
-    io.emit('order:update', order);
+    if (io) {
+      io.emit('order:rejected', order);
+      io.emit('order:update', order);
+    }
 
     res.json(order);
   } catch (err) {
@@ -248,7 +260,8 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
       include: { items: true },
     });
 
-    req.app.get('io').emit('order:update', order);
+    const io = req.app.get('io');
+    if (io) io.emit('order:update', order);
 
     res.json(order);
   } catch (err) {
@@ -275,7 +288,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const deletedId = req.params.id;
     await prisma.order.delete({ where: { id: deletedId } });
 
-    req.app.get('io').emit('order:deleted', { id: deletedId });
+    const io = req.app.get('io');
+    if (io) io.emit('order:deleted', { id: deletedId });
 
     res.json({ ok: true, id: deletedId });
   } catch (err) {
