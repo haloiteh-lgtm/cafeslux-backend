@@ -1,6 +1,9 @@
 const router = require('express').Router();
 const prisma = require('../utils/prisma');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireRole } = require('../middleware/auth');
+
+// Modes de paiement acceptés
+const PAY_METHODS = ['cash', 'card', 'paypal'];
 
 function computePoints(items, total) {
   const perProduct = items.reduce((sum, i) => sum + (i.points || 0) * (i.qty || 1), 0);
@@ -12,6 +15,14 @@ router.post('/', optionalAuth, async (req, res) => {
   try {
     const { items, customer, customerPhone, customerName, payMethod, source, giftCardCode } = req.body;
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Aucun article dans la commande' });
+
+    // ── Validation du mode de paiement ──────────────────
+    const method = String(payMethod || 'cash').toLowerCase();
+    if (!PAY_METHODS.includes(method)) {
+      return res.status(400).json({ error: 'Mode de paiement invalide' });
+    }
+    // Espèces => la commande attend la validation d'un admin
+    const isCash = method === 'cash';
 
     const total = items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
 
@@ -57,9 +68,10 @@ router.post('/', optionalAuth, async (req, res) => {
     const order = await prisma.order.create({
       data: {
         source: source || 'menu',
-        status: 'PENDING',
+        status: isCash ? 'PENDING' : 'APPROVED',
         total,
-        payMethod,
+        payMethod: method,
+        paymentStatus: isCash ? 'awaiting_approval' : 'paid',
         giftCardUsed,
         pointsEarned,
         customerId: customerRecord?.id,
@@ -94,7 +106,10 @@ router.post('/', optionalAuth, async (req, res) => {
       }
     }
 
-    req.app.get('io').emit('order:new', order);
+    const io = req.app.get('io');
+    io.emit('order:new', order);
+    // Notification dédiée au Dashboard admin
+    if (isCash) io.emit('order:pending-approval', order);
 
     res.status(201).json(order);
   } catch (err) {
@@ -113,9 +128,13 @@ const STATUS_MAP = {
 };
 
 router.get('/', requireAuth, async (req, res) => {
-  const { status, limit } = req.query;
+  const { status, limit, awaiting } = req.query;
   let where;
-  if (status === 'all') {
+
+  // ?awaiting=1 => uniquement les commandes espèces en attente de validation
+  if (awaiting === '1' || awaiting === 'true') {
+    where = { paymentStatus: 'awaiting_approval' };
+  } else if (status === 'all') {
     where = {};
   } else if (status) {
     const mapped = STATUS_MAP[status.toLowerCase()] || status.toUpperCase();
@@ -123,6 +142,7 @@ router.get('/', requireAuth, async (req, res) => {
   } else {
     where = { status: { notIn: ['COMPLETED', 'CANCELLED'] } };
   }
+
   const take = Math.min(parseInt(limit, 10) || 200, 500);
   const orders = await prisma.order.findMany({
     where,
@@ -133,10 +153,87 @@ router.get('/', requireAuth, async (req, res) => {
   res.json(orders);
 });
 
+// Suivi public : le client garde son écran d'attente ouvert
+router.get('/:id/public-status', async (req, res) => {
+  const order = await prisma.order.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+      payMethod: true,
+      total: true,
+      createdAt: true,
+    },
+  });
+  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+  res.json(order);
+});
+
 router.get('/:id', requireAuth, async (req, res) => {
   const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { items: true } });
   if (!order) return res.status(404).json({ error: 'Commande introuvable' });
   res.json(order);
+});
+
+// L'admin valide un paiement en espèces
+router.post('/:id/approve', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Commande introuvable' });
+    if (existing.paymentStatus !== 'awaiting_approval') {
+      return res.status(400).json({ error: 'Cette commande a déjà été traitée' });
+    }
+
+    const order = await prisma.order.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'APPROVED',
+        paymentStatus: 'paid',
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+      },
+      include: { items: true },
+    });
+
+    const io = req.app.get('io');
+    io.emit('order:approved', order);
+    io.emit('order:update', order);
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// L'admin refuse un paiement en espèces
+router.post('/:id/reject', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Commande introuvable' });
+    if (existing.paymentStatus !== 'awaiting_approval') {
+      return res.status(400).json({ error: 'Cette commande a déjà été traitée' });
+    }
+
+    const order = await prisma.order.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'CANCELLED',
+        paymentStatus: 'rejected',
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+      },
+      include: { items: true },
+    });
+
+    const io = req.app.get('io');
+    io.emit('order:rejected', order);
+    io.emit('order:update', order);
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
 });
 
 router.patch('/:id/status', requireAuth, async (req, res) => {
