@@ -171,6 +171,12 @@ model Order {
   total         Float
   payMethod     String?
 
+  // ── Paiement ──────────────────────────────
+  // paid | awaiting_approval | rejected
+  paymentStatus String      @default("paid")
+  approvedBy    String?
+  approvedAt    DateTime?
+
   employee      Employee?   @relation(fields: [employeeId], references: [id])
   employeeId    String?
 
