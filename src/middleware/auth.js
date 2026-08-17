@@ -2,8 +2,16 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
-function sign(payload, expiresIn = '12h') {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn });
+// Durées de session :
+//  - Personnel (POS, Admin)  : 12 h — la caisse ne doit pas rester ouverte
+//  - Clients (Mon Espace LUX): 90 j — connexion persistante demandée
+const STAFF_EXPIRY    = process.env.STAFF_TOKEN_EXPIRY    || '12h';
+const CUSTOMER_EXPIRY = process.env.CUSTOMER_TOKEN_EXPIRY || '90d';
+
+function sign(payload, expiresIn) {
+  const ttl = expiresIn
+    || (payload && payload.role === 'CUSTOMER' ? CUSTOMER_EXPIRY : STAFF_EXPIRY);
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
 }
 
 // Attaches req.user if a valid token is present, but does not block the request.
@@ -38,4 +46,12 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { sign, optionalAuth, requireAuth, requireRole, JWT_SECRET };
+module.exports = {
+  sign,
+  optionalAuth,
+  requireAuth,
+  requireRole,
+  JWT_SECRET,
+  STAFF_EXPIRY,
+  CUSTOMER_EXPIRY,
+};
