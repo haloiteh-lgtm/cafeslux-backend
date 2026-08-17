@@ -183,6 +183,8 @@ model Order {
   pointsEarned  Int         @default(0)
   giftCardUsed  String?
 
+  transactions  Transaction[]
+
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
@@ -202,23 +204,74 @@ model OrderItem {
 }
 
 // ─────────────────────────────────────────────
-// CUSTOMERS / LOYALTY
+// CUSTOMERS / LOYALTY / WALLET
 // ─────────────────────────────────────────────
 model Customer {
-  id           String    @id @default(cuid())
-  name         String?
-  phone        String    @unique
-  email        String?
-  passwordHash String?
+  id            String    @id @default(cuid())
+  name          String?
+  phone         String    @unique
+  email         String?
+  passwordHash  String?
 
-  pointsTotal  Int       @default(0)
-  pointsUsed   Int       @default(0)
+  // ── Profil ──────────────────────────────
+  avatarUrl     String?
 
-  createdAt    DateTime  @default(now())
+  // ── Points de fidélité ──────────────────
+  pointsTotal   Int       @default(0)
+  pointsUsed    Int       @default(0)
 
-  orders       Order[]
-  giftCards    GiftCard[]
-  reviews      Review[]
+  // ── Portefeuille (Solde LUX) ────────────
+  walletBalance Float     @default(0)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  orders        Order[]
+  giftCards     GiftCard[]
+  reviews       Review[]
+  transactions  Transaction[]
+}
+
+// ─────────────────────────────────────────────
+// TRANSACTIONS — historique Wallet + Points
+// ─────────────────────────────────────────────
+enum TransactionType {
+  TOPUP           // Rechargement du solde        (+ DH)
+  PAYMENT         // Paiement par solde           (- DH)
+  REFUND          // Remboursement                (+ DH)
+  GIFTCARD_CREDIT // Carte cadeau créditée        (+ DH)
+  POINTS_EARNED   // Points gagnés sur commande   (+ pts)
+  POINTS_REDEEMED // Points échangés              (- pts)
+  ADJUSTMENT      // Correction manuelle admin
+}
+
+model Transaction {
+  id           String          @id @default(cuid())
+
+  customer     Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId   String
+
+  type         TransactionType
+  label        String
+
+  // Montant en DH : positif = crédit, négatif = débit, 0 = opération points seule
+  amount       Float           @default(0)
+
+  // Points : positif = gagnés, négatif = utilisés
+  pointsDelta  Int             @default(0)
+
+  // Photo du compte APRÈS l'opération
+  balanceAfter Float           @default(0)
+  pointsAfter  Int             @default(0)
+
+  order        Order?          @relation(fields: [orderId], references: [id])
+  orderId      String?
+
+  createdBy    String?
+
+  createdAt    DateTime        @default(now())
+
+  @@index([customerId, createdAt])
 }
 
 // ─────────────────────────────────────────────
