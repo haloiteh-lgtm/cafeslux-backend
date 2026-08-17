@@ -1,21 +1,17 @@
 const router = require('express').Router();
 const prisma = require('../utils/prisma');
 const { optionalAuth, requireAuth, requireRole } = require('../middleware/auth');
+const { pointsForAmount, recordTransaction } = require('../utils/wallet');
 
 // ─────────────────────────────────────────────────────────────
 // Modes de paiement acceptés
-//   cash      → Espèces          : ATTEND la validation d'un admin
-//   tpe/card  → Carte Bancaire   : validé immédiatement
-//   paypal    → PayPal           : validé immédiatement
+//   cash      → Espèces      : ATTEND la validation d'un admin
+//   tpe/card  → Carte Bancaire : validé immédiatement
+//   paypal    → PayPal         : validé immédiatement
 //   gift_card → Carte Cadeau LUX : validé immédiatement
+//   wallet    → Solde LUX        : débité immédiatement
 // ─────────────────────────────────────────────────────────────
-const PAY_METHODS = ['cash', 'tpe', 'card', 'paypal', 'gift_card'];
-
-function computePoints(items, total) {
-  const perProduct = items.reduce((sum, i) => sum + (i.points || 0) * (i.qty || 1), 0);
-  if (perProduct > 0) return perProduct;
-  return Math.floor(total / 10);
-}
+const PAY_METHODS = ['cash', 'tpe', 'card', 'paypal', 'gift_card', 'wallet'];
 
 router.post('/', optionalAuth, async (req, res) => {
   try {
@@ -35,12 +31,31 @@ router.post('/', optionalAuth, async (req, res) => {
     let customerRecord = null;
     const phone = customerPhone || (typeof customer === 'object' ? customer?.phone : null);
     const name = customerName || (typeof customer === 'object' ? customer?.name : (typeof customer === 'string' ? customer : null));
-    if (phone) {
+
+    // Un client connecté est identifié par son token, jamais par le body
+    if (req.user && req.user.role === 'CUSTOMER') {
+      customerRecord = await prisma.customer.findUnique({ where: { id: req.user.id } });
+    }
+    if (!customerRecord && phone) {
       customerRecord = await prisma.customer.upsert({
         where: { phone },
         update: { name: name || undefined },
         create: { phone, name },
       });
+    }
+
+    // ── Paiement par solde LUX ──────────────────────────
+    if (method === 'wallet') {
+      if (!customerRecord) {
+        return res.status(401).json({ error: 'Connectez-vous pour payer avec votre solde LUX' });
+      }
+      if ((customerRecord.walletBalance || 0) < total) {
+        return res.status(400).json({
+          error: `Solde insuffisant (${(customerRecord.walletBalance || 0).toFixed(2)} DH disponible pour ${total.toFixed(2)} DH)`,
+          balance: customerRecord.walletBalance || 0,
+          total,
+        });
+      }
     }
 
     let giftCardUsed = null;
@@ -69,7 +84,9 @@ router.post('/', optionalAuth, async (req, res) => {
       giftCardUsed = giftCardCode;
     }
 
-    const pointsEarned = customerRecord ? computePoints(items, remainingTotal) : 0;
+    // ── Points : règle officielle 10 DH = 1 point ───────
+    const bonusPoints = items.reduce((sum, i) => sum + (i.points || 0) * (i.qty || 1), 0);
+    const pointsEarned = customerRecord ? pointsForAmount(remainingTotal, bonusPoints) : 0;
 
     const order = await prisma.order.create({
       data: {
@@ -81,8 +98,8 @@ router.post('/', optionalAuth, async (req, res) => {
         giftCardUsed,
         pointsEarned,
         customerId: customerRecord?.id,
-        customerName: name,
-        customerPhone: phone,
+        customerName: name || customerRecord?.name,
+        customerPhone: phone || customerRecord?.phone,
         employeeId: req.user && req.user.role !== 'CUSTOMER' ? req.user.id : undefined,
         items: {
           create: items.map(i => ({
@@ -96,11 +113,34 @@ router.post('/', optionalAuth, async (req, res) => {
       include: { items: true },
     });
 
-    if (customerRecord && pointsEarned > 0) {
-      await prisma.customer.update({
-        where: { id: customerRecord.id },
-        data: { pointsTotal: { increment: pointsEarned } },
-      });
+    // ── Débit du solde LUX ──────────────────────────────
+    if (method === 'wallet' && customerRecord) {
+      try {
+        await recordTransaction({
+          customerId: customerRecord.id,
+          type: 'PAYMENT',
+          label: `Commande #${order.id.slice(-6).toUpperCase()}`,
+          amount: -total,
+          orderId: order.id,
+        });
+      } catch (e) {
+        // Le débit a échoué : on annule la commande pour rester cohérent
+        await prisma.order.delete({ where: { id: order.id } }).catch(() => {});
+        return res.status(400).json({ error: e.message || 'Paiement par solde impossible' });
+      }
+    }
+
+    // ── Crédit des points (avec ligne d'historique) ─────
+    // Pour une commande en espèces, les points sont crédités
+    // seulement après validation par l'admin (voir /approve).
+    if (customerRecord && pointsEarned > 0 && !isCash) {
+      await recordTransaction({
+        customerId: customerRecord.id,
+        type: 'POINTS_EARNED',
+        label: `Points gagnés — commande #${order.id.slice(-6).toUpperCase()}`,
+        pointsDelta: pointsEarned,
+        orderId: order.id,
+      }).catch(() => {});
     }
 
     for (const i of items) {
@@ -204,6 +244,18 @@ router.post('/:id/approve', requireAuth, requireRole('ADMIN', 'MANAGER'), async 
       include: { items: true },
     });
 
+    // Les points ne sont crédités qu'une fois le paiement validé
+    if (order.customerId && order.pointsEarned > 0) {
+      await recordTransaction({
+        customerId: order.customerId,
+        type: 'POINTS_EARNED',
+        label: `Points gagnés — commande #${order.id.slice(-6).toUpperCase()}`,
+        pointsDelta: order.pointsEarned,
+        orderId: order.id,
+        createdBy: req.user.id,
+      }).catch(() => {});
+    }
+
     const io = req.app.get('io');
     if (io) {
       io.emit('order:approved', order);
@@ -275,6 +327,17 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) return res.status(404).json({ error: 'Commande introuvable' });
 
+    // Remboursement du solde si la commande avait été payée par wallet
+    if (order.payMethod === 'wallet' && order.customerId && order.paymentStatus === 'paid') {
+      await recordTransaction({
+        customerId: order.customerId,
+        type: 'REFUND',
+        label: `Remboursement — commande #${order.id.slice(-6).toUpperCase()}`,
+        amount: order.total,
+        createdBy: req.user.id,
+      }).catch(() => {});
+    }
+
     if (order.giftCardUsed) {
       const gc = await prisma.giftCard.findUnique({ where: { code: order.giftCardUsed } });
       if (gc) {
@@ -286,6 +349,10 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 
     const deletedId = req.params.id;
+    await prisma.transaction.updateMany({
+      where: { orderId: deletedId },
+      data: { orderId: null },
+    }).catch(() => {});
     await prisma.order.delete({ where: { id: deletedId } });
 
     const io = req.app.get('io');
