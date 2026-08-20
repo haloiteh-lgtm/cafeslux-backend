@@ -25,19 +25,42 @@ function customerOnly(req, res, next) {
 
 router.get('/me', requireAuth, customerOnly, async (req, res) => {
   try {
-    const customer = await prisma.customer.findUnique({ where: { id: req.user.id } });
+    // Lecture complète (avec avatarUrl / walletBalance). Si la base n'a pas
+    // encore reçu la migration (colonnes manquantes), on se rabat sur une
+    // sélection minimale : la connexion ne doit JAMAIS être bloquée par ça.
+    let customer;
+    try {
+      customer = await prisma.customer.findUnique({ where: { id: req.user.id } });
+    } catch (e) {
+      console.error('[CUSTOMERS_ME] lecture complète échouée, repli minimal:', e.message);
+      customer = await prisma.customer.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true, name: true, phone: true, email: true,
+          pointsTotal: true, pointsUsed: true, createdAt: true,
+        },
+      });
+    }
     if (!customer) return res.status(404).json({ error: 'Compte introuvable' });
 
-    // Statistiques réelles (aucune donnée fictive)
-    const [ordersAgg, ordersCount] = await Promise.all([
-      prisma.order.aggregate({
-        where: { customerId: customer.id, status: { not: 'CANCELLED' } },
-        _sum: { total: true },
-      }),
-      prisma.order.count({
-        where: { customerId: customer.id, status: { not: 'CANCELLED' } },
-      }),
-    ]);
+    // Statistiques réelles (non bloquantes si elles échouent)
+    let ordersCount = 0;
+    let totalSpent = 0;
+    try {
+      const [ordersAgg, count] = await Promise.all([
+        prisma.order.aggregate({
+          where: { customerId: customer.id, status: { not: 'CANCELLED' } },
+          _sum: { total: true },
+        }),
+        prisma.order.count({
+          where: { customerId: customer.id, status: { not: 'CANCELLED' } },
+        }),
+      ]);
+      ordersCount = count;
+      totalSpent = Number((ordersAgg._sum.total || 0).toFixed(2));
+    } catch (e) {
+      console.error('[CUSTOMERS_ME] stats indisponibles:', e.message);
+    }
 
     res.json({
       id: customer.id,
@@ -53,7 +76,7 @@ router.get('/me', requireAuth, customerOnly, async (req, res) => {
       walletBalance: Number((customer.walletBalance || 0).toFixed(2)),
 
       ordersCount,
-      totalSpent: Number((ordersAgg._sum.total || 0).toFixed(2)),
+      totalSpent,
 
       memberSince: customer.createdAt,
       createdAt: customer.createdAt,
