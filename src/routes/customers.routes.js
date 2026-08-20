@@ -88,7 +88,7 @@ router.get('/me', requireAuth, customerOnly, async (req, res) => {
 
 router.patch('/me', requireAuth, customerOnly, async (req, res) => {
   try {
-    const { name, email, avatarUrl } = req.body;
+    const { name, email, avatarUrl, phone } = req.body;
     const data = {};
 
     if (name !== undefined) {
@@ -104,6 +104,24 @@ router.patch('/me', requireAuth, customerOnly, async (req, res) => {
         return res.status(400).json({ error: 'Adresse email invalide' });
       }
       data.email = clean || null;
+    }
+
+    // Utile pour les comptes créés via Google, qui n'ont pas de
+    // téléphone au départ.
+    if (phone !== undefined) {
+      const clean = String(phone).trim();
+      if (clean) {
+        if (!/^[0-9+\s-]{6,20}$/.test(clean)) {
+          return res.status(400).json({ error: 'Numéro de téléphone invalide' });
+        }
+        const existing = await prisma.customer.findUnique({ where: { phone: clean } });
+        if (existing && existing.id !== req.user.id) {
+          return res.status(409).json({ error: 'Ce numéro est déjà utilisé par un autre compte' });
+        }
+        data.phone = clean;
+      } else {
+        data.phone = null;
+      }
     }
 
     if (avatarUrl !== undefined) {
@@ -134,7 +152,7 @@ router.patch('/me', requireAuth, customerOnly, async (req, res) => {
       id: customer.id,
       name: customer.name,
       email: customer.email,
-      phone: customer.phone,
+      phone: customer.phone || null,
       avatarUrl: customer.avatarUrl || null,
     });
   } catch (err) {
