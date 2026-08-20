@@ -32,16 +32,24 @@ router.post('/', optionalAuth, async (req, res) => {
     const phone = customerPhone || (typeof customer === 'object' ? customer?.phone : null);
     const name = customerName || (typeof customer === 'object' ? customer?.name : (typeof customer === 'string' ? customer : null));
 
-    // Un client connecté est identifié par son token, jamais par le body
-    if (req.user && req.user.role === 'CUSTOMER') {
-      customerRecord = await prisma.customer.findUnique({ where: { id: req.user.id } });
-    }
-    if (!customerRecord && phone) {
-      customerRecord = await prisma.customer.upsert({
-        where: { phone },
-        update: { name: name || undefined },
-        create: { phone, name },
-      });
+    // Un client connecté est identifié par son token, jamais par le body.
+    // Si cette étape échoue (ex. colonne manquante après une migration
+    // incomplète), la commande NE DOIT JAMAIS être bloquée pour autant —
+    // elle repasse simplement en commande "invité".
+    try {
+      if (req.user && req.user.role === 'CUSTOMER') {
+        customerRecord = await prisma.customer.findUnique({ where: { id: req.user.id } });
+      }
+      if (!customerRecord && phone) {
+        customerRecord = await prisma.customer.upsert({
+          where: { phone },
+          update: { name: name || undefined },
+          create: { phone, name },
+        });
+      }
+    } catch (e) {
+      console.error('[ORDER] identification client échouée, commande traitée en invité:', e.message);
+      customerRecord = null;
     }
 
     // ── Paiement par solde LUX ──────────────────────────
