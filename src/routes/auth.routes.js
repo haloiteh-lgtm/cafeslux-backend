@@ -1,7 +1,17 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
+const { OAuth2Client } = require('google-auth-library');
 const prisma = require('../utils/prisma');
 const { sign, requireAuth } = require('../middleware/auth');
+
+// ─────────────────────────────────────────────────────────────
+// GOOGLE SIGN-IN
+// Le Client ID vient de Google Cloud Console → APIs & Services
+// → Credentials → OAuth Client ID (type "Web application").
+// Doit être défini sur Railway dans Variables : GOOGLE_CLIENT_ID
+// ─────────────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 // POST /api/auth/pin  { pin }
 // Used by POS Caisse, Lux Admin, Staff Portal.
@@ -40,7 +50,7 @@ router.post('/pin', async (req, res) => {
   }
 });
 
-// POST /api/auth/login  { phone, password } — for Mon Espace Lux (customer accounts)
+// POST /api/auth/login  { phone, password } — pour Mon Espace Lux (comptes clients)
 router.post('/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
@@ -59,7 +69,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/register — create a customer account
+// POST /api/auth/register — création d'un compte client
 router.post('/register', async (req, res) => {
   try {
     const { name, phone, password, email } = req.body;
@@ -78,12 +88,104 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /api/auth/google  { credential }
+// "credential" = le jeton ID renvoyé par le bouton Google
+// ("Sign in with Google" / Google Identity Services).
+// Le jeton est vérifié côté serveur — jamais fait confiance
+// aux données envoyées telles quelles par le navigateur.
+// ─────────────────────────────────────────────────────────────
+router.post('/google', async (req, res) => {
+  try {
+    if (!googleClient) {
+      return res.status(503).json({
+        error: 'Connexion Google non configurée sur le serveur (GOOGLE_CLIENT_ID manquant)',
+      });
+    }
+
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ error: 'Jeton Google manquant' });
+
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (e) {
+      return res.status(401).json({ error: 'Jeton Google invalide ou expiré' });
+    }
+
+    if (!payload || !payload.sub || !payload.email) {
+      return res.status(401).json({ error: 'Réponse Google incomplète' });
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email;
+    const name = payload.name || email.split('@')[0];
+    const avatarUrl = payload.picture || null;
+
+    // 1) Compte déjà lié à ce Google ID
+    let customer = await prisma.customer.findUnique({ where: { googleId } });
+
+    // 2) Sinon, un compte existe peut-être déjà avec cet email
+    //    (créé via téléphone/mot de passe) — on le relie à Google.
+    if (!customer && email) {
+      customer = await prisma.customer.findFirst({ where: { email } });
+      if (customer) {
+        customer = await prisma.customer.update({
+          where: { id: customer.id },
+          data: {
+            googleId,
+            avatarUrl: customer.avatarUrl || avatarUrl,
+          },
+        });
+      }
+    }
+
+    // 3) Sinon, nouveau compte (pas de téléphone à ce stade —
+    //    le client pourra l'ajouter dans "Mes informations")
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: { googleId, email, name, avatarUrl },
+      });
+    }
+
+    const token = sign({ id: customer.id, role: 'CUSTOMER', name: customer.name });
+
+    res.json({
+      token,
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        avatarUrl: customer.avatarUrl,
+        pointsTotal: customer.pointsTotal,
+        pointsUsed: customer.pointsUsed,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 // GET /api/auth/me
 router.get('/me', requireAuth, async (req, res) => {
   if (req.user.role === 'CUSTOMER') {
     const customer = await prisma.customer.findUnique({ where: { id: req.user.id } });
     if (!customer) return res.status(404).json({ error: 'Introuvable' });
-    return res.json({ id: customer.id, name: customer.name, phone: customer.phone, role: 'CUSTOMER', pointsTotal: customer.pointsTotal, pointsUsed: customer.pointsUsed });
+    return res.json({
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      avatarUrl: customer.avatarUrl || null,
+      role: 'CUSTOMER',
+      pointsTotal: customer.pointsTotal,
+      pointsUsed: customer.pointsUsed,
+    });
   }
   const employee = await prisma.employee.findUnique({ where: { id: req.user.id } });
   if (!employee) return res.status(404).json({ error: 'Introuvable' });
