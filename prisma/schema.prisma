@@ -209,9 +209,14 @@ model OrderItem {
 model Customer {
   id            String    @id @default(cuid())
   name          String?
-  phone         String    @unique
+  // Optionnel : un compte créé via Google n'a pas forcément de téléphone.
+  // Le client pourra l'ajouter plus tard dans "Mes informations".
+  phone         String?   @unique
   email         String?
   passwordHash  String?
+
+  // ── Connexion Google ─────────────────────
+  googleId      String?   @unique
 
   // ── Profil ──────────────────────────────
   avatarUrl     String?
