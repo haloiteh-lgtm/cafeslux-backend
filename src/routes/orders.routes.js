@@ -357,7 +357,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 
     const deletedId = req.params.id;
-    await prisma.transaction.updateMany({
+    await prisma.walletTransaction.updateMany({
       where: { orderId: deletedId },
       data: { orderId: null },
     }).catch(() => {});
