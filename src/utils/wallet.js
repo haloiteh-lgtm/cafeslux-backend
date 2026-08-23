@@ -12,22 +12,11 @@ const DH_PER_POINT = 10;
 // Valeur d'un point lorsqu'il est échangé
 const POINT_VALUE_DH = 0.1;
 
-/**
- * Calcule les points gagnés pour un montant donné.
- * `bonus` = points bonus définis produit par produit (champ Product.points).
- */
 function pointsForAmount(amount, bonus = 0) {
   const base = Math.floor((Number(amount) || 0) / DH_PER_POINT);
   return Math.max(0, base + (Number(bonus) || 0));
 }
 
-/**
- * Écrit une opération dans l'historique ET met à jour le compte client.
- * Tout est fait dans une transaction SQL : soit tout passe, soit rien.
- *
- *  amount      → montant en DH  (positif = crédit, négatif = débit)
- *  pointsDelta → points         (positif = gagnés, négatif = utilisés)
- */
 async function recordTransaction({
   customerId,
   type,
@@ -49,8 +38,6 @@ async function recordTransaction({
     const newBalance = Number((customer.walletBalance + amt).toFixed(2));
     if (newBalance < 0) throw new Error('Solde insuffisant');
 
-    // Les points gagnés augmentent pointsTotal,
-    // les points utilisés augmentent pointsUsed.
     const data = { walletBalance: newBalance };
     if (pts > 0) data.pointsTotal = { increment: pts };
     if (pts < 0) {
@@ -62,7 +49,7 @@ async function recordTransaction({
     const updated = await tx.customer.update({ where: { id: customerId }, data });
     const pointsAfter = updated.pointsTotal - updated.pointsUsed;
 
-    const transaction = await tx.transaction.create({
+    const transaction = await tx.walletTransaction.create({
       data: {
         customerId,
         type,
@@ -80,27 +67,26 @@ async function recordTransaction({
   });
 }
 
-/** Résumé du portefeuille : soldes, totaux gagnés / dépensés. */
 async function getWalletSummary(customerId) {
   const [customer, credits, debits, earned, redeemed, count] = await Promise.all([
     prisma.customer.findUnique({ where: { id: customerId } }),
-    prisma.transaction.aggregate({
+    prisma.walletTransaction.aggregate({
       where: { customerId, amount: { gt: 0 } },
       _sum: { amount: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.walletTransaction.aggregate({
       where: { customerId, amount: { lt: 0 } },
       _sum: { amount: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.walletTransaction.aggregate({
       where: { customerId, pointsDelta: { gt: 0 } },
       _sum: { pointsDelta: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.walletTransaction.aggregate({
       where: { customerId, pointsDelta: { lt: 0 } },
       _sum: { pointsDelta: true },
     }),
-    prisma.transaction.count({ where: { customerId } }),
+    prisma.walletTransaction.count({ where: { customerId } }),
   ]);
 
   if (!customer) return null;
