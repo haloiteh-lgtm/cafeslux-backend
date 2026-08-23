@@ -25,9 +25,6 @@ function customerOnly(req, res, next) {
 
 router.get('/me', requireAuth, customerOnly, async (req, res) => {
   try {
-    // Lecture complète (avec avatarUrl / walletBalance). Si la base n'a pas
-    // encore reçu la migration (colonnes manquantes), on se rabat sur une
-    // sélection minimale : la connexion ne doit JAMAIS être bloquée par ça.
     let customer;
     try {
       customer = await prisma.customer.findUnique({ where: { id: req.user.id } });
@@ -43,7 +40,6 @@ router.get('/me', requireAuth, customerOnly, async (req, res) => {
     }
     if (!customer) return res.status(404).json({ error: 'Compte introuvable' });
 
-    // Statistiques réelles (non bloquantes si elles échouent)
     let ordersCount = 0;
     let totalSpent = 0;
     try {
@@ -106,8 +102,6 @@ router.patch('/me', requireAuth, customerOnly, async (req, res) => {
       data.email = clean || null;
     }
 
-    // Utile pour les comptes créés via Google, qui n'ont pas de
-    // téléphone au départ.
     if (phone !== undefined) {
       const clean = String(phone).trim();
       if (clean) {
@@ -134,7 +128,6 @@ router.patch('/me', requireAuth, customerOnly, async (req, res) => {
         if (!isData && !isHttp) {
           return res.status(400).json({ error: 'Format de photo non supporté' });
         }
-        // ~700 Ko en base64 : la photo doit être redimensionnée côté client
         if (str.length > 950000) {
           return res.status(413).json({ error: 'Photo trop lourde (max ~700 Ko)' });
         }
@@ -183,14 +176,14 @@ router.get('/me/transactions', requireAuth, customerOnly, async (req, res) => {
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
     const [rows, total] = await Promise.all([
-      prisma.transaction.findMany({
+      prisma.walletTransaction.findMany({
         where: { customerId: req.user.id },
         orderBy: { createdAt: 'desc' },
         take,
         skip,
         include: { order: { select: { id: true, total: true, status: true } } },
       }),
-      prisma.transaction.count({ where: { customerId: req.user.id } }),
+      prisma.walletTransaction.count({ where: { customerId: req.user.id } }),
     ]);
 
     res.json({
@@ -411,7 +404,7 @@ router.post('/:id/wallet/topup', requireAuth, requireRole('ADMIN', 'MANAGER', 'C
 
 // Historique d'un client, côté staff
 router.get('/:id/transactions', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
-  const rows = await prisma.transaction.findMany({
+  const rows = await prisma.walletTransaction.findMany({
     where: { customerId: req.params.id },
     orderBy: { createdAt: 'desc' },
     take: 100,
