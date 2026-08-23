@@ -21,7 +21,7 @@ enum EmployeeRole {
 model Employee {
   id              String         @id @default(cuid())
   name            String
-  pin             String
+  pin             String?
   role            EmployeeRole   @default(STAFF)
   phone           String?
   active          Boolean        @default(true)
@@ -183,7 +183,7 @@ model Order {
   pointsEarned  Int         @default(0)
   giftCardUsed  String?
 
-  transactions  Transaction[]
+  transactions  WalletTransaction[]
 
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
@@ -234,7 +234,7 @@ model Customer {
   orders        Order[]
   giftCards     GiftCard[]
   reviews       Review[]
-  transactions  Transaction[]
+  transactions  WalletTransaction[]
 }
 
 // ─────────────────────────────────────────────
@@ -250,7 +250,7 @@ enum TransactionType {
   ADJUSTMENT      // Correction manuelle admin
 }
 
-model Transaction {
+model WalletTransaction {
   id           String          @id @default(cuid())
 
   customer     Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
